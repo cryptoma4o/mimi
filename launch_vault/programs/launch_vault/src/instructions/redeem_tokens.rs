@@ -84,6 +84,8 @@ pub fn handler(ctx: Context<RedeemTokens>, amount: u64) -> Result<()> {
         .checked_div(vault.remaining_token_amount as u128)
         .ok_or(LaunchVaultError::ArithmeticOverflow)? as u64;
 
+    require!(proportional_lp > 0, LaunchVaultError::ZeroRedeemAmount);
+
     // Calculate redemption fee
     let redemption_fee = (proportional_lp as u128)
         .checked_mul(ctx.accounts.protocol_config.redemption_fee_bps as u128)

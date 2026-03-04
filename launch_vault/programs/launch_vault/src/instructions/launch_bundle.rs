@@ -112,6 +112,26 @@ pub struct LaunchBundle<'info> {
     #[account(mut)]
     pub mayhem_token_vault: UncheckedAccount<'info>,
 
+    // === PumpFun volume accumulators ===
+    /// CHECK: PumpFun global_volume_accumulator PDA
+    pub pump_global_volume_accumulator: UncheckedAccount<'info>,
+
+    /// CHECK: PumpFun creator_vault PDA ["creator-vault", creator]
+    #[account(mut)]
+    pub pump_creator_vault: UncheckedAccount<'info>,
+
+    /// CHECK: PumpFun fee_config PDA (from Fee Program)
+    pub pump_fee_config: UncheckedAccount<'info>,
+
+    /// CHECK: PumpFun bonding_curve_v2 PDA ["bonding-curve-v2", mint]
+    pub pump_bonding_curve_v2: UncheckedAccount<'info>,
+
+    /// CHECK: PumpFun Fee Program
+    #[account(
+        constraint = pump_fee_program.key() == pump_fun::FEE_PROGRAM_ID
+    )]
+    pub pump_fee_program: UncheckedAccount<'info>,
+
     // === System ===
     pub system_program: Program<'info, System>,
 
@@ -123,8 +143,8 @@ pub struct LaunchBundle<'info> {
     pub rent: Sysvar<'info, Rent>,
 
     // === remaining_accounts ===
-    // [vault_token_account, buyer_0_pda, buyer_0_ata, buyer_1_pda, buyer_1_ata, ...]
-    // Count: 1 + num_buyers * 2
+    // [vault_token_account, buyer_0_pda, buyer_0_ata, buyer_0_vol, buyer_1_pda, buyer_1_ata, buyer_1_vol, ...]
+    // Count: 1 + num_buyers * 3
 }
 
 pub fn handler<'info>(
@@ -156,8 +176,8 @@ pub fn handler<'info>(
         LaunchVaultError::InsufficientLpLiquidity
     );
 
-    // remaining_accounts: [vault_ata, buyer0_pda, buyer0_ata, buyer1_pda, buyer1_ata, ...]
-    let expected_remaining = 1 + num_buyers * 2;
+    // remaining_accounts: [vault_ata, buyer0_pda, buyer0_ata, buyer0_vol, ...]
+    let expected_remaining = 1 + num_buyers * 3;
     require!(
         ctx.remaining_accounts.len() == expected_remaining,
         LaunchVaultError::InvalidRemainingAccounts
@@ -173,6 +193,7 @@ pub fn handler<'info>(
         .ok_or(LaunchVaultError::ArithmeticOverflow)?;
 
     require!(total_max_sol <= buy_budget, LaunchVaultError::BudgetExceeded);
+
 
     // ========================================================
     // STEP 1: CPI create_v2 — create token on Pump.fun
@@ -222,6 +243,7 @@ pub fn handler<'info>(
         ],
     )?;
 
+
     // ========================================================
     // STEP 2: Initialize vault_state PDA manually
     // ========================================================
@@ -264,6 +286,7 @@ pub fn handler<'info>(
         &[vault_seeds],
     )?;
 
+
     // ========================================================
     // STEP 3: Create vault ATA via CPI
     // ========================================================
@@ -287,6 +310,7 @@ pub fn handler<'info>(
             ctx.accounts.associated_token_program.to_account_info(),
         ],
     )?;
+
 
     // ========================================================
     // STEP 4: Pay fees + reserve LP
@@ -336,19 +360,18 @@ pub fn handler<'info>(
         .checked_sub(lp_pool.reserved_liquidity)
         .ok_or(LaunchVaultError::ArithmeticOverflow)?;
 
+
     // ========================================================
     // STEP 5: Loop — fund buyer PDAs + CPI buy + transfer tokens to vault
     // ========================================================
-    let lp_pool_bump = ctx.accounts.lp_pool.bump;
-    let lp_pool_seeds: &[&[u8]] = &[b"lp_pool", &[lp_pool_bump]];
-
     let mut total_tokens_bought: u64 = 0;
     let mut total_sol_spent: u64 = 0;
 
     // Distribute buy_budget proportionally based on max_sol_costs
     for i in 0..num_buyers {
-        let buyer_pda_info = &ctx.remaining_accounts[1 + i * 2];
-        let buyer_ata_info = &ctx.remaining_accounts[1 + i * 2 + 1];
+        let buyer_pda_info = &ctx.remaining_accounts[1 + i * 3];
+        let buyer_ata_info = &ctx.remaining_accounts[1 + i * 3 + 1];
+        let buyer_vol_info = &ctx.remaining_accounts[1 + i * 3 + 2];
 
         let buyer_index = i as u8;
 
@@ -371,18 +394,19 @@ pub fn handler<'info>(
 
         let sol_for_this_buyer = max_sol_costs[i];
 
-        // a) Transfer SOL: lp_pool → buyer PDA
+        // a) Fund buyer PDA: user fronts SOL via system_program::transfer
+        //    (LP pool will reimburse user after the loop)
         system_program::transfer(
-            CpiContext::new_with_signer(
+            CpiContext::new(
                 ctx.accounts.system_program.to_account_info(),
                 system_program::Transfer {
-                    from: ctx.accounts.lp_pool.to_account_info(),
+                    from: ctx.accounts.user.to_account_info(),
                     to: buyer_pda_info.clone(),
                 },
-                &[lp_pool_seeds],
             ),
             sol_for_this_buyer,
         )?;
+
 
         // b) Create buyer ATA via CPI
         invoke(
@@ -404,7 +428,10 @@ pub fn handler<'info>(
             ],
         )?;
 
+
         // c) CPI buy on Pump.fun (buyer PDA as signer)
+        let buyer_user_vol_acc = pump_fun::derive_user_volume_accumulator(&expected_buyer_pda);
+
         let buy_ix = pump_fun::build_buy_instruction(
             &ctx.accounts.pump_global.key(),
             &ctx.accounts.pump_fee_recipient.key(),
@@ -415,8 +442,12 @@ pub fn handler<'info>(
             &expected_buyer_pda,
             &ctx.accounts.system_program.key(),
             &ctx.accounts.token_program.key(),
-            &ctx.accounts.rent.key(),
+            &ctx.accounts.pump_creator_vault.key(),
             &ctx.accounts.pump_event_authority.key(),
+            &ctx.accounts.pump_global_volume_accumulator.key(),
+            &buyer_user_vol_acc,
+            &ctx.accounts.pump_fee_config.key(),
+            &ctx.accounts.pump_bonding_curve_v2.key(),
             buy_amounts[i],
             sol_for_this_buyer,
         );
@@ -433,17 +464,21 @@ pub fn handler<'info>(
                 buyer_pda_info.clone(),
                 ctx.accounts.system_program.to_account_info(),
                 ctx.accounts.token_program.to_account_info(),
-                ctx.accounts.rent.to_account_info(),
+                ctx.accounts.pump_creator_vault.to_account_info(),
                 ctx.accounts.pump_event_authority.to_account_info(),
                 ctx.accounts.pump_program.to_account_info(),
+                ctx.accounts.pump_global_volume_accumulator.to_account_info(),
+                buyer_vol_info.clone(),
+                ctx.accounts.pump_fee_config.to_account_info(),
+                ctx.accounts.pump_fee_program.to_account_info(),
+                ctx.accounts.pump_bonding_curve_v2.to_account_info(),
             ],
             &[buyer_seeds],
         )?;
 
+
         // d) Read actual tokens received from Pump.fun buy
-        let ata_data = buyer_ata_info.try_borrow_data()?;
-        let actual_tokens = u64::from_le_bytes(ata_data[64..72].try_into().unwrap());
-        drop(ata_data);
+        let actual_tokens = crate::cpi::token_utils::read_token_account_amount(buyer_ata_info)?;
 
         // e) Transfer tokens: buyer ATA → vault ATA (Token2022 transfer_checked)
         let transfer_ix = build_transfer_checked_instruction(
@@ -490,7 +525,7 @@ pub fn handler<'info>(
             &[buyer_seeds],
         )?;
 
-        // g) Return unused SOL from buyer PDA to lp_pool
+        // g) Return unused SOL from buyer PDA to user
         let buyer_lamports = buyer_pda_info.lamports();
         if buyer_lamports > 0 {
             let spent = sol_for_this_buyer.saturating_sub(buyer_lamports);
@@ -498,15 +533,35 @@ pub fn handler<'info>(
                 .checked_add(spent)
                 .ok_or(LaunchVaultError::ArithmeticOverflow)?;
 
-            // Return all remaining lamports
-            **buyer_pda_info.try_borrow_mut_lamports()? -= buyer_lamports;
-            **ctx.accounts.lp_pool.to_account_info().try_borrow_mut_lamports()? += buyer_lamports;
+            // Return all remaining lamports via CPI (buyer_pda owned by System Program)
+            invoke_signed(
+                &system_instruction::transfer(
+                    &expected_buyer_pda,
+                    &user_key,
+                    buyer_lamports,
+                ),
+                &[
+                    buyer_pda_info.clone(),
+                    ctx.accounts.user.to_account_info(),
+                    ctx.accounts.system_program.to_account_info(),
+                ],
+                &[buyer_seeds],
+            )?;
         } else {
             total_sol_spent = total_sol_spent
                 .checked_add(sol_for_this_buyer)
                 .ok_or(LaunchVaultError::ArithmeticOverflow)?;
         }
     }
+
+
+    // Reimburse user from lp_pool for the SOL they fronted during buys.
+    // The user fronted total_sol_spent, and lp_pool should cover it.
+    if total_sol_spent > 0 {
+        **ctx.accounts.lp_pool.to_account_info().try_borrow_mut_lamports()? -= total_sol_spent;
+        **ctx.accounts.user.to_account_info().try_borrow_mut_lamports()? += total_sol_spent;
+    }
+
 
     // ========================================================
     // STEP 6: Write vault state manually
@@ -557,6 +612,7 @@ pub fn handler<'info>(
         .total_liquidity
         .checked_sub(lp_pool.reserved_liquidity)
         .ok_or(LaunchVaultError::ArithmeticOverflow)?;
+
 
     // ========================================================
     // STEP 8: Emit event

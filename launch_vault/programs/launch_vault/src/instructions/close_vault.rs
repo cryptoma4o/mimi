@@ -40,9 +40,9 @@ pub struct CloseVault<'info> {
 
 pub fn handler(ctx: Context<CloseVault>) -> Result<()> {
     // Verify token account is empty before closing
-    let ata_data = ctx.accounts.vault_token_account.try_borrow_data()?;
-    let token_amount = u64::from_le_bytes(ata_data[64..72].try_into().unwrap());
-    drop(ata_data);
+    let token_amount = crate::cpi::token_utils::read_token_account_amount(
+        &ctx.accounts.vault_token_account.to_account_info(),
+    )?;
     require!(
         token_amount == 0,
         LaunchVaultError::VaultTokenAccountNotEmpty

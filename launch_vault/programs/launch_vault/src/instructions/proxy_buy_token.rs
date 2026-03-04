@@ -1,8 +1,8 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::program::invoke_signed;
-use anchor_lang::system_program;
+use anchor_lang::solana_program::program::invoke;
 
 use crate::cpi::pump_fun;
+use crate::cpi::token_utils;
 use crate::state::*;
 use crate::errors::LaunchVaultError;
 use crate::events::TokenBoughtEvent;
@@ -10,6 +10,7 @@ use crate::events::TokenBoughtEvent;
 #[derive(Accounts)]
 pub struct ProxyBuyToken<'info> {
     #[account(
+        mut,
         constraint = executor.key() == protocol_config.executor @ LaunchVaultError::UnauthorizedExecutor,
     )]
     pub executor: Signer<'info>,
@@ -36,11 +37,15 @@ pub struct ProxyBuyToken<'info> {
     )]
     pub lp_pool: Account<'info, LpPool>,
 
-    /// CHECK: Vault's token account — tokens arrive here from Pump.fun buy CPI
+    /// CHECK: Vault's token account — final destination for purchased tokens
     #[account(mut)]
     pub vault_token_account: UncheckedAccount<'info>,
 
-    /// CHECK: Token mint — passed through to Pump.fun buy CPI
+    /// CHECK: Executor's token account — receives tokens from PumpFun buy, then forwards to vault
+    #[account(mut)]
+    pub executor_token_account: UncheckedAccount<'info>,
+
+    /// CHECK: Token mint — passed through to PumpFun buy CPI
     pub token_mint: UncheckedAccount<'info>,
 
     /// CHECK: Pump.fun program ID verified in constraint
@@ -68,12 +73,36 @@ pub struct ProxyBuyToken<'info> {
     /// CHECK: Event authority PDA ["__event_authority"]
     pub pump_event_authority: UncheckedAccount<'info>,
 
+    /// CHECK: PumpFun global_volume_accumulator PDA
+    pub pump_global_volume_accumulator: UncheckedAccount<'info>,
+
+    /// CHECK: PumpFun user_volume_accumulator PDA (derived from executor)
+    #[account(mut)]
+    pub pump_user_volume_accumulator: UncheckedAccount<'info>,
+
+    /// CHECK: PumpFun creator_vault PDA ["creator-vault", creator]
+    #[account(mut)]
+    pub pump_creator_vault: UncheckedAccount<'info>,
+
+    /// CHECK: PumpFun fee_config PDA (from Fee Program)
+    pub pump_fee_config: UncheckedAccount<'info>,
+
+    /// CHECK: PumpFun bonding_curve_v2 PDA ["bonding-curve-v2", mint]
+    pub pump_bonding_curve_v2: UncheckedAccount<'info>,
+
+    /// CHECK: PumpFun Fee Program
+    #[account(
+        constraint = pump_fee_program.key() == pump_fun::FEE_PROGRAM_ID
+    )]
+    pub pump_fee_program: UncheckedAccount<'info>,
+
     pub system_program: Program<'info, System>,
 
     /// CHECK: Token2022 program
     pub token_program: UncheckedAccount<'info>,
 
-    pub rent: Sysvar<'info, Rent>,
+    /// CHECK: Associated Token Program — for creating executor ATA
+    pub associated_token_program: UncheckedAccount<'info>,
 }
 
 pub fn handler(
@@ -91,90 +120,121 @@ pub fn handler(
 
     require!(max_sol_cost <= buy_budget, LaunchVaultError::BudgetExceeded);
 
-    // --- Step 1: Transfer SOL from lp_pool PDA → vault PDA ---
-    let lp_pool_bump = ctx.accounts.lp_pool.bump;
-    let lp_pool_seeds: &[&[u8]] = &[b"lp_pool", &[lp_pool_bump]];
+    // Snapshot executor balance before any operations
+    let executor_balance_before = ctx.accounts.executor.to_account_info().lamports();
 
-    system_program::transfer(
-        CpiContext::new_with_signer(
-            ctx.accounts.system_program.to_account_info(),
-            system_program::Transfer {
-                from: ctx.accounts.lp_pool.to_account_info(),
-                to: ctx.accounts.vault_state.to_account_info(),
-            },
-            &[lp_pool_seeds],
-        ),
-        buy_budget,
-    )?;
-
-    // --- Step 2: CPI buy on Pump.fun with vault PDA as signer ---
-    let vault_user = vault.user;
-    let vault_token_mint = vault.token_mint;
-    let vault_bump = vault.bump;
-    let vault_seeds: &[&[u8]] = &[
-        b"vault",
-        vault_user.as_ref(),
-        vault_token_mint.as_ref(),
-        &[vault_bump],
-    ];
-
-    let ix = pump_fun::build_buy_instruction(
-        &ctx.accounts.pump_global.key(),
-        &ctx.accounts.pump_fee_recipient.key(),
-        &ctx.accounts.token_mint.key(),
-        &ctx.accounts.pump_bonding_curve.key(),
-        &ctx.accounts.pump_associated_bonding_curve.key(),
-        &ctx.accounts.vault_token_account.key(),
-        &ctx.accounts.vault_state.key(),
-        &ctx.accounts.system_program.key(),
-        &ctx.accounts.token_program.key(),
-        &ctx.accounts.rent.key(),
-        &ctx.accounts.pump_event_authority.key(),
-        amount,
-        max_sol_cost,
-    );
-
-    let account_infos = vec![
-        ctx.accounts.pump_global.to_account_info(),
-        ctx.accounts.pump_fee_recipient.to_account_info(),
-        ctx.accounts.token_mint.to_account_info(),
-        ctx.accounts.pump_bonding_curve.to_account_info(),
-        ctx.accounts.pump_associated_bonding_curve.to_account_info(),
-        ctx.accounts.vault_token_account.to_account_info(),
-        ctx.accounts.vault_state.to_account_info(),
-        ctx.accounts.system_program.to_account_info(),
-        ctx.accounts.token_program.to_account_info(),
-        ctx.accounts.rent.to_account_info(),
-        ctx.accounts.pump_event_authority.to_account_info(),
-        ctx.accounts.pump_program.to_account_info(),
-    ];
-
-    invoke_signed(&ix, &account_infos, &[vault_seeds])?;
-
-    // --- Step 3: Return unused SOL from vault PDA → lp_pool ---
-    let vault_lamports = ctx.accounts.vault_state.to_account_info().lamports();
-    let vault_rent = Rent::get()?.minimum_balance(8 + LaunchVaultState::INIT_SPACE);
-    let excess_lamports = vault_lamports.saturating_sub(vault_rent);
-
-    if excess_lamports > 0 {
-        // Transfer excess SOL back to lp_pool
-        let vault_info = ctx.accounts.vault_state.to_account_info();
-        let lp_pool_info = ctx.accounts.lp_pool.to_account_info();
-        **vault_info.try_borrow_mut_lamports()? -= excess_lamports;
-        **lp_pool_info.try_borrow_mut_lamports()? += excess_lamports;
+    // --- Step 1: Create executor ATA if it doesn't exist (idempotent) ---
+    {
+        let create_ata_ix = token_utils::build_create_ata_idempotent_instruction(
+            &ctx.accounts.executor.key(),
+            &ctx.accounts.executor.key(),
+            &ctx.accounts.token_mint.key(),
+            &ctx.accounts.token_program.key(),
+            &ctx.accounts.associated_token_program.key(),
+        );
+        invoke(
+            &create_ata_ix,
+            &[
+                ctx.accounts.executor.to_account_info(),
+                ctx.accounts.executor_token_account.to_account_info(),
+                ctx.accounts.executor.to_account_info(),
+                ctx.accounts.token_mint.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.associated_token_program.to_account_info(),
+            ],
+        )?;
     }
 
-    let sol_spent = buy_budget.saturating_sub(excess_lamports);
+    // --- Step 2: CPI buy on PumpFun — executor pays SOL from their wallet ---
+    {
+        let ix = pump_fun::build_buy_instruction(
+            &ctx.accounts.pump_global.key(),
+            &ctx.accounts.pump_fee_recipient.key(),
+            &ctx.accounts.token_mint.key(),
+            &ctx.accounts.pump_bonding_curve.key(),
+            &ctx.accounts.pump_associated_bonding_curve.key(),
+            &ctx.accounts.executor_token_account.key(), // tokens go to executor ATA
+            &ctx.accounts.executor.key(),               // executor pays SOL
+            &ctx.accounts.system_program.key(),
+            &ctx.accounts.token_program.key(),
+            &ctx.accounts.pump_creator_vault.key(),
+            &ctx.accounts.pump_event_authority.key(),
+            &ctx.accounts.pump_global_volume_accumulator.key(),
+            &ctx.accounts.pump_user_volume_accumulator.key(),
+            &ctx.accounts.pump_fee_config.key(),
+            &ctx.accounts.pump_bonding_curve_v2.key(),
+            amount,
+            max_sol_cost,
+        );
 
-    // --- Step 4: Update state ---
+        invoke(
+            &ix,
+            &[
+                ctx.accounts.pump_global.to_account_info(),
+                ctx.accounts.pump_fee_recipient.to_account_info(),
+                ctx.accounts.token_mint.to_account_info(),
+                ctx.accounts.pump_bonding_curve.to_account_info(),
+                ctx.accounts.pump_associated_bonding_curve.to_account_info(),
+                ctx.accounts.executor_token_account.to_account_info(),
+                ctx.accounts.executor.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.pump_creator_vault.to_account_info(),
+                ctx.accounts.pump_event_authority.to_account_info(),
+                ctx.accounts.pump_program.to_account_info(),
+                ctx.accounts.pump_global_volume_accumulator.to_account_info(),
+                ctx.accounts.pump_user_volume_accumulator.to_account_info(),
+                ctx.accounts.pump_fee_config.to_account_info(),
+                ctx.accounts.pump_fee_program.to_account_info(),
+                ctx.accounts.pump_bonding_curve_v2.to_account_info(),
+            ],
+        )?;
+    }
+
+    // --- Step 3: Transfer tokens from executor ATA → vault ATA ---
+    let actual_tokens = token_utils::read_token_account_amount(
+        &ctx.accounts.executor_token_account.to_account_info(),
+    )?;
+    require!(actual_tokens > 0, LaunchVaultError::ZeroTokenAmount);
+
+    {
+        let transfer_ix = token_utils::build_token_transfer_instruction(
+            &ctx.accounts.token_program.key(),
+            &ctx.accounts.executor_token_account.key(),
+            &ctx.accounts.vault_token_account.key(),
+            &ctx.accounts.executor.key(),
+            actual_tokens,
+        );
+        invoke(
+            &transfer_ix,
+            &[
+                ctx.accounts.executor_token_account.to_account_info(),
+                ctx.accounts.vault_token_account.to_account_info(),
+                ctx.accounts.executor.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+            ],
+        )?;
+    }
+
+    // --- Step 4: Reimburse executor from lp_pool ---
+    // Calculate how much SOL the executor spent (buy cost + ATA rent).
+    let executor_balance_after = ctx.accounts.executor.to_account_info().lamports();
+    let sol_spent_by_executor = executor_balance_before.saturating_sub(executor_balance_after);
+
+    // Reimburse only up to buy_budget (executor covers any excess like ATA rent)
+    let reimbursement = sol_spent_by_executor.min(buy_budget);
+
+    if reimbursement > 0 {
+        let lp_pool_info = ctx.accounts.lp_pool.to_account_info();
+        let executor_info = ctx.accounts.executor.to_account_info();
+        **lp_pool_info.try_borrow_mut_lamports()? -= reimbursement;
+        **executor_info.try_borrow_mut_lamports()? += reimbursement;
+    }
+
+    // --- Step 5: Update state ---
     let vault_key = ctx.accounts.vault_state.key();
     let executor_key = ctx.accounts.executor.key();
-
-    // Read actual token balance from vault ATA after buy (not the requested amount)
-    let vault_ata_info = ctx.accounts.vault_token_account.to_account_info();
-    let ata_data = vault_ata_info.try_borrow_data()?;
-    let actual_tokens = u64::from_le_bytes(ata_data[64..72].try_into().unwrap());
-    drop(ata_data);
 
     let vault = &mut ctx.accounts.vault_state;
     vault.total_token_amount = actual_tokens;
@@ -184,7 +244,7 @@ pub fn handler(
     let lp_pool = &mut ctx.accounts.lp_pool;
     lp_pool.total_liquidity = lp_pool
         .total_liquidity
-        .checked_sub(sol_spent)
+        .checked_sub(reimbursement)
         .ok_or(LaunchVaultError::ArithmeticOverflow)?;
     // Release user_contribution from reserved (it was spent in the buy).
     // lp_allocation stays reserved until redeem/liquidate.
@@ -203,7 +263,7 @@ pub fn handler(
         executor: executor_key,
         token_mint: vault.token_mint,
         token_amount: actual_tokens,
-        sol_spent,
+        sol_spent: reimbursement,
         timestamp: clock.unix_timestamp,
     });
 

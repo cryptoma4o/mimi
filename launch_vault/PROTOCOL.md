@@ -1357,3 +1357,71 @@ programs/launch_vault/
     ├── errors.rs                           # LaunchVaultError (26 вариантов)
     └── events.rs                           # 13 event structs
 ```
+
+---
+
+## Devnet Deployment
+
+| Компонент | Адрес |
+|----------|-------|
+| Program | `2hpb3dPckVbTf81WoeYt2BybcUZQCevxi1N5DwjaRsL7` |
+| Admin / Executor / Treasury | `66HBrTxNii7eFzSTgo8mUzsij3FM7xC2L9jE2H89sDYs` |
+| ProtocolConfig PDA | `4Zjh2HcUSCSaqqTt7xT4hr28A8Wmz4eXXJ2hqWuVRWwM` |
+| LP Pool PDA | `HbDnSjsk5WZSpmGTRNkTmpS2gFryWZ6nva4jte9am4aM` |
+| Address Lookup Table | `G7Aqezkcab2GJtphbNCi8HUG2hfW6ZQman3GT9UgjP6M` |
+
+### Текущие параметры (devnet)
+
+```
+rental_period:      86400s (24ч)
+rental_fee_rate:    100,000 lamports (0.0001 SOL)
+infrastructure_fee: 50,000 lamports (0.00005 SOL)
+redemption_fee_bps: 250 (2.5%)
+grace_period:       3600s (1ч)
+```
+
+---
+
+## CLI
+
+```bash
+# Управление протоколом
+yarn cli init                                     # Инициализация
+yarn cli deposit-lp --amount 5                    # Депозит SOL
+yarn cli withdraw-lp --amount 1                   # Вывод SOL
+yarn cli status                                   # Статус протокола
+
+# Загрузка метаданных токена
+yarn cli upload-metadata \
+  --name "MimiCat" --symbol "MIMI" \
+  --description "Community meme token" \
+  --image "https://example.com/logo.png" \
+  --twitter "https://x.com/..." \
+  --telegram "https://t.me/..."
+
+# Пошаговый запуск
+yarn cli create-token --name "Token" --symbol "TKN" --uri <URI>
+yarn cli create-vault --mint <PUBKEY> --lp-allocation 0.5 --user-contribution 0.3
+yarn cli proxy-buy --mint <PUBKEY> --amount 1000000 --max-sol-cost 0.5
+
+# Атомарный запуск (всё в одной TX)
+yarn cli launch-bundle \
+  --name "Token" --symbol "TKN" --uri <URI> \
+  --lp-allocation 0.5 --user-contribution 0.3 \
+  --buy-amounts 1000000 --max-sol-costs 0.5
+
+# Глобальные опции
+#   --keypair <PATH>      (default: ~/solana-wallet.json)
+#   --cluster <CLUSTER>   (devnet | mainnet-beta, default: devnet)
+#   --rpc <URL>           (custom RPC)
+#   --priority-fee <NUM>  (microLamports, default: 50000)
+```
+
+---
+
+## Успешные тесты (devnet)
+
+| Тест | TX | Токен |
+|------|-----|-------|
+| launch_bundle (1 buyer) | `61nkJDGanFMA...` | `41ZNEY...` |
+| launch_bundle (MimiCat) | `uaZn2FD9Un1n...` | `6R1oEJ...` |
