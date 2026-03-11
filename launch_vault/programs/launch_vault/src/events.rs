@@ -5,41 +5,36 @@ pub struct ProtocolInitializedEvent {
     pub admin: Pubkey,
     pub executor: Pubkey,
     pub treasury: Pubkey,
-    pub rental_period: i64,
-    pub rental_fee_rate: u64,
-    pub infrastructure_fee: u64,
+    pub fixed_fee: u64,
+    pub fee_bps: u16,
+    pub max_utilization_bps: u16,
+    pub position_timeout: i64,
     pub redemption_fee_bps: u16,
-    pub grace_period: i64,
     pub timestamp: i64,
 }
 
 #[event]
-pub struct VaultCreatedEvent {
+pub struct PositionOpenedEvent {
+    pub vault: Pubkey,
     pub user: Pubkey,
     pub token_mint: Pubkey,
-    pub vault: Pubkey,
+    pub num_buyers: u8,
+    pub total_tokens: u64,
+    pub total_sol_spent: u64,
     pub lp_allocation: u64,
     pub user_contribution: u64,
-    pub rental_due_timestamp: i64,
+    pub fee_paid: u64,
     pub timestamp: i64,
 }
 
 #[event]
-pub struct TokenBoughtEvent {
+pub struct PositionSoldEvent {
     pub vault: Pubkey,
-    pub executor: Pubkey,
+    pub seller: Pubkey,
     pub token_mint: Pubkey,
-    pub token_amount: u64,
-    pub sol_spent: u64,
-    pub timestamp: i64,
-}
-
-#[event]
-pub struct RentalPaidEvent {
-    pub vault: Pubkey,
-    pub user: Pubkey,
-    pub rental_fee: u64,
-    pub new_rental_due_timestamp: i64,
+    pub tokens_sold: u64,
+    pub sol_received: u64,
+    pub sol_returned_to_pool: u64,
     pub timestamp: i64,
 }
 
@@ -57,30 +52,22 @@ pub struct TokensRedeemedEvent {
 }
 
 #[event]
-pub struct VaultDefaultedEvent {
+pub struct PositionClosedEvent {
     pub vault: Pubkey,
-    pub user: Pubkey,
-    pub token_mint: Pubkey,
-    pub remaining_tokens: u64,
-    pub remaining_lp: u64,
-    pub cranker: Pubkey,
+    pub closer: Pubkey,
+    pub is_permissionless: bool,
+    pub close_reward: u64,
     pub timestamp: i64,
 }
 
 #[event]
-pub struct VaultLiquidatedEvent {
+pub struct PositionForceClosedEvent {
     pub vault: Pubkey,
     pub executor: Pubkey,
     pub token_mint: Pubkey,
-    pub tokens_liquidated: u64,
-    pub lp_lost: u64,
-    pub timestamp: i64,
-}
-
-#[event]
-pub struct VaultClosedEvent {
-    pub vault: Pubkey,
-    pub user: Pubkey,
+    pub tokens_sold: u64,
+    pub sol_recovered: u64,
+    pub lp_loss: u64,
     pub timestamp: i64,
 }
 
@@ -92,10 +79,21 @@ pub struct ProtocolConfigUpdatedEvent {
 
 #[event]
 pub struct LpDepositedEvent {
-    pub authority: Pubkey,
-    pub amount: u64,
+    pub depositor: Pubkey,
+    pub sol_amount: u64,
+    pub lp_tokens_minted: u64,
     pub new_total_liquidity: u64,
-    pub new_available_liquidity: u64,
+    pub lp_token_price: u64,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct LpWithdrawnEvent {
+    pub withdrawer: Pubkey,
+    pub lp_tokens_burned: u64,
+    pub sol_amount: u64,
+    pub new_total_liquidity: u64,
+    pub lp_token_price: u64,
     pub timestamp: i64,
 }
 
@@ -110,23 +108,8 @@ pub struct TokenCreatedEvent {
 }
 
 #[event]
-pub struct LaunchBundleEvent {
-    pub vault: Pubkey,
-    pub user: Pubkey,
-    pub token_mint: Pubkey,
-    pub num_buyers: u8,
-    pub total_tokens: u64,
-    pub total_sol_spent: u64,
-    pub lp_allocation: u64,
-    pub user_contribution: u64,
-    pub timestamp: i64,
-}
-
-#[event]
-pub struct LpWithdrawnEvent {
-    pub authority: Pubkey,
-    pub amount: u64,
-    pub new_total_liquidity: u64,
-    pub new_available_liquidity: u64,
+pub struct InsuranceFundUpdatedEvent {
+    pub new_total: u64,
+    pub amount_added: u64,
     pub timestamp: i64,
 }

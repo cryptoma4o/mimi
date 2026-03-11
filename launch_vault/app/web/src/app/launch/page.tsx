@@ -9,9 +9,9 @@ export default function LaunchPage() {
   if (!connected) {
     return (
       <div className="text-center py-20">
-        <p className="text-gray-400 text-lg">Connect your executor wallet to launch a bundle.</p>
+        <p className="text-gray-400 text-lg">Connect your wallet to open a position.</p>
         <p className="text-gray-500 text-sm mt-2">
-          Your wallet must be the protocol executor to use this feature.
+          Create token + open position + buy tokens atomically in one transaction.
         </p>
       </div>
     );
@@ -19,9 +19,9 @@ export default function LaunchPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-white mb-2">Launch Bundle</h1>
+      <h1 className="text-2xl font-bold text-white mb-2">Open Position</h1>
       <p className="text-gray-400 text-sm mb-6">
-        Create token + vault + buy tokens atomically in one transaction.
+        Create token + open position + buy tokens atomically in one transaction.
       </p>
       <LaunchBundleForm />
     </div>

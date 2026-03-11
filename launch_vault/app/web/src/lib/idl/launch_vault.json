@@ -8,25 +8,25 @@
   },
   "instructions": [
     {
-      "name": "close_vault",
+      "name": "close_position",
       "discriminator": [
-        141,
-        103,
-        17,
-        126,
-        72,
-        75,
-        29,
-        29
+        123,
+        134,
+        81,
+        0,
+        49,
+        68,
+        98,
+        98
       ],
       "accounts": [
         {
-          "name": "user",
+          "name": "closer",
+          "docs": [
+            "Closer: vault owner (anytime when Closed) or anyone (after timeout)"
+          ],
           "writable": true,
-          "signer": true,
-          "relations": [
-            "vault_state"
-          ]
+          "signer": true
         },
         {
           "name": "vault_state",
@@ -45,7 +45,8 @@
               },
               {
                 "kind": "account",
-                "path": "user"
+                "path": "vault_state.user",
+                "account": "LaunchVaultState"
               },
               {
                 "kind": "account",
@@ -54,71 +55,6 @@
               }
             ]
           }
-        },
-        {
-          "name": "vault_token_account",
-          "writable": true
-        },
-        {
-          "name": "token_program"
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "create_vault",
-      "discriminator": [
-        29,
-        237,
-        247,
-        208,
-        193,
-        82,
-        54,
-        135
-      ],
-      "accounts": [
-        {
-          "name": "user",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "token_mint"
-        },
-        {
-          "name": "vault_state",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "user"
-              },
-              {
-                "kind": "account",
-                "path": "token_mint"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault_token_account",
-          "writable": true
         },
         {
           "name": "protocol_config",
@@ -168,31 +104,22 @@
           }
         },
         {
-          "name": "treasury",
+          "name": "vault_owner",
           "writable": true
         },
         {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
+          "name": "vault_token_account",
+          "writable": true
         },
         {
           "name": "token_program"
         },
         {
-          "name": "associated_token_program",
-          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         }
       ],
-      "args": [
-        {
-          "name": "lp_allocation",
-          "type": "u64"
-        },
-        {
-          "name": "user_contribution",
-          "type": "u64"
-        }
-      ]
+      "args": []
     },
     {
       "name": "deposit_lp",
@@ -208,7 +135,7 @@
       ],
       "accounts": [
         {
-          "name": "authority",
+          "name": "depositor",
           "writable": true,
           "signer": true
         },
@@ -233,6 +160,21 @@
           }
         },
         {
+          "name": "lp_mint",
+          "writable": true
+        },
+        {
+          "name": "depositor_lp_ata",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
@@ -243,6 +185,157 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "force_close_position",
+      "discriminator": [
+        109,
+        177,
+        151,
+        242,
+        227,
+        130,
+        79,
+        37
+      ],
+      "accounts": [
+        {
+          "name": "executor",
+          "signer": true
+        },
+        {
+          "name": "vault_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.user",
+                "account": "LaunchVaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.token_mint",
+                "account": "LaunchVaultState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "protocol_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  116,
+                  111,
+                  99,
+                  111,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "lp_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "pump_program"
+        },
+        {
+          "name": "pump_global",
+          "writable": true
+        },
+        {
+          "name": "pump_fee_recipient",
+          "writable": true
+        },
+        {
+          "name": "pump_bonding_curve",
+          "writable": true
+        },
+        {
+          "name": "pump_associated_bonding_curve",
+          "writable": true
+        },
+        {
+          "name": "pump_event_authority"
+        },
+        {
+          "name": "pump_creator_vault",
+          "writable": true
+        },
+        {
+          "name": "pump_global_volume_accumulator"
+        },
+        {
+          "name": "pump_vault_volume_accumulator",
+          "writable": true
+        },
+        {
+          "name": "pump_fee_config"
+        },
+        {
+          "name": "pump_bonding_curve_v2"
+        },
+        {
+          "name": "pump_fee_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
     },
     {
       "name": "initialize_protocol",
@@ -311,8 +404,46 @@
           }
         },
         {
+          "name": "insurance_fund",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  110,
+                  115,
+                  117,
+                  114,
+                  97,
+                  110,
+                  99,
+                  101,
+                  95,
+                  102,
+                  117,
+                  110,
+                  100
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "lp_mint",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
         }
       ],
       "args": [
@@ -325,61 +456,60 @@
           "type": "pubkey"
         },
         {
-          "name": "rental_period",
+          "name": "fixed_fee",
+          "type": "u64"
+        },
+        {
+          "name": "fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "max_utilization_bps",
+          "type": "u16"
+        },
+        {
+          "name": "position_timeout",
           "type": "i64"
         },
         {
-          "name": "rental_fee_rate",
-          "type": "u64"
+          "name": "close_reward_bps",
+          "type": "u16"
         },
         {
-          "name": "infrastructure_fee",
-          "type": "u64"
+          "name": "insurance_split_bps",
+          "type": "u16"
         },
         {
           "name": "redemption_fee_bps",
           "type": "u16"
-        },
-        {
-          "name": "grace_period",
-          "type": "i64"
         }
       ]
     },
     {
-      "name": "launch_bundle",
+      "name": "open_position",
       "discriminator": [
-        62,
-        117,
-        251,
-        150,
-        1,
-        231,
-        160,
-        120
+        135,
+        128,
+        47,
+        77,
+        15,
+        152,
+        240,
+        49
       ],
       "accounts": [
         {
           "name": "user",
-          "docs": [
-            "Token creator, pays fees + user_contribution"
-          ],
           "writable": true,
           "signer": true
         },
         {
           "name": "mint",
-          "docs": [
-            "Fresh keypair for new token mint"
-          ],
           "writable": true,
           "signer": true
         },
         {
           "name": "executor",
-          "docs": [
-            "Authorized executor"
-          ],
           "signer": true
         },
         {
@@ -436,6 +566,33 @@
         {
           "name": "treasury",
           "writable": true
+        },
+        {
+          "name": "insurance_fund",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  110,
+                  115,
+                  117,
+                  114,
+                  97,
+                  110,
+                  99,
+                  101,
+                  95,
+                  102,
+                  117,
+                  110,
+                  100
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "pump_program"
@@ -495,6 +652,9 @@
           "name": "pump_bonding_curve_v2"
         },
         {
+          "name": "pump_fee_program"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         },
@@ -546,447 +706,6 @@
           "type": {
             "vec": "u64"
           }
-        }
-      ]
-    },
-    {
-      "name": "liquidate_vault",
-      "discriminator": [
-        106,
-        212,
-        123,
-        68,
-        193,
-        252,
-        239,
-        189
-      ],
-      "accounts": [
-        {
-          "name": "executor",
-          "signer": true
-        },
-        {
-          "name": "vault_state",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "vault_state.user",
-                "account": "LaunchVaultState"
-              },
-              {
-                "kind": "account",
-                "path": "vault_state.token_mint",
-                "account": "LaunchVaultState"
-              }
-            ]
-          }
-        },
-        {
-          "name": "protocol_config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  114,
-                  111,
-                  116,
-                  111,
-                  99,
-                  111,
-                  108,
-                  95,
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "lp_pool",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  108,
-                  112,
-                  95,
-                  112,
-                  111,
-                  111,
-                  108
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault_token_account",
-          "writable": true
-        },
-        {
-          "name": "executor_token_account",
-          "writable": true
-        },
-        {
-          "name": "token_mint"
-        },
-        {
-          "name": "token_program"
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "mark_defaulted",
-      "discriminator": [
-        97,
-        81,
-        37,
-        229,
-        172,
-        125,
-        169,
-        178
-      ],
-      "accounts": [
-        {
-          "name": "cranker",
-          "docs": [
-            "Permissionless cranker — anyone can call"
-          ],
-          "signer": true
-        },
-        {
-          "name": "vault_state",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "vault_state.user",
-                "account": "LaunchVaultState"
-              },
-              {
-                "kind": "account",
-                "path": "vault_state.token_mint",
-                "account": "LaunchVaultState"
-              }
-            ]
-          }
-        },
-        {
-          "name": "protocol_config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  114,
-                  111,
-                  116,
-                  111,
-                  99,
-                  111,
-                  108,
-                  95,
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "pay_rental",
-      "discriminator": [
-        114,
-        15,
-        111,
-        207,
-        115,
-        207,
-        108,
-        169
-      ],
-      "accounts": [
-        {
-          "name": "user",
-          "writable": true,
-          "signer": true,
-          "relations": [
-            "vault_state"
-          ]
-        },
-        {
-          "name": "vault_state",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "user"
-              },
-              {
-                "kind": "account",
-                "path": "vault_state.token_mint",
-                "account": "LaunchVaultState"
-              }
-            ]
-          }
-        },
-        {
-          "name": "protocol_config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  114,
-                  111,
-                  116,
-                  111,
-                  99,
-                  111,
-                  108,
-                  95,
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "treasury",
-          "writable": true
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "proxy_buy_token",
-      "discriminator": [
-        173,
-        178,
-        67,
-        161,
-        39,
-        206,
-        187,
-        5
-      ],
-      "accounts": [
-        {
-          "name": "executor",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "vault_state",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "vault_state.user",
-                "account": "LaunchVaultState"
-              },
-              {
-                "kind": "account",
-                "path": "vault_state.token_mint",
-                "account": "LaunchVaultState"
-              }
-            ]
-          }
-        },
-        {
-          "name": "protocol_config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  114,
-                  111,
-                  116,
-                  111,
-                  99,
-                  111,
-                  108,
-                  95,
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "lp_pool",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  108,
-                  112,
-                  95,
-                  112,
-                  111,
-                  111,
-                  108
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault_token_account",
-          "writable": true
-        },
-        {
-          "name": "executor_token_account",
-          "writable": true
-        },
-        {
-          "name": "token_mint"
-        },
-        {
-          "name": "pump_program"
-        },
-        {
-          "name": "pump_global",
-          "writable": true
-        },
-        {
-          "name": "pump_fee_recipient",
-          "writable": true
-        },
-        {
-          "name": "pump_bonding_curve",
-          "writable": true
-        },
-        {
-          "name": "pump_associated_bonding_curve",
-          "writable": true
-        },
-        {
-          "name": "pump_event_authority"
-        },
-        {
-          "name": "pump_global_volume_accumulator"
-        },
-        {
-          "name": "pump_user_volume_accumulator",
-          "writable": true
-        },
-        {
-          "name": "pump_creator_vault",
-          "writable": true
-        },
-        {
-          "name": "pump_fee_config"
-        },
-        {
-          "name": "pump_bonding_curve_v2"
-        },
-        {
-          "name": "pump_fee_program"
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        },
-        {
-          "name": "token_program"
-        },
-        {
-          "name": "associated_token_program"
-        }
-      ],
-      "args": [
-        {
-          "name": "amount",
-          "type": "u64"
-        },
-        {
-          "name": "max_sol_cost",
-          "type": "u64"
         }
       ]
     },
@@ -1216,6 +935,170 @@
       ]
     },
     {
+      "name": "sell_position",
+      "discriminator": [
+        11,
+        170,
+        234,
+        139,
+        126,
+        196,
+        142,
+        74
+      ],
+      "accounts": [
+        {
+          "name": "seller",
+          "docs": [
+            "Seller: must be vault owner OR executor (keeper)"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.user",
+                "account": "LaunchVaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.token_mint",
+                "account": "LaunchVaultState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "protocol_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  116,
+                  111,
+                  99,
+                  111,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "lp_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "pump_program"
+        },
+        {
+          "name": "pump_global",
+          "writable": true
+        },
+        {
+          "name": "pump_fee_recipient",
+          "writable": true
+        },
+        {
+          "name": "pump_bonding_curve",
+          "writable": true
+        },
+        {
+          "name": "pump_associated_bonding_curve",
+          "writable": true
+        },
+        {
+          "name": "pump_event_authority"
+        },
+        {
+          "name": "pump_creator_vault",
+          "writable": true
+        },
+        {
+          "name": "pump_global_volume_accumulator"
+        },
+        {
+          "name": "pump_vault_volume_accumulator",
+          "writable": true
+        },
+        {
+          "name": "pump_fee_config"
+        },
+        {
+          "name": "pump_bonding_curve_v2"
+        },
+        {
+          "name": "pump_fee_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "min_sol_output",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "update_protocol_config",
       "discriminator": [
         197,
@@ -1275,33 +1158,45 @@
           }
         },
         {
-          "name": "new_rental_period",
+          "name": "new_fixed_fee",
+          "type": {
+            "option": "u64"
+          }
+        },
+        {
+          "name": "new_fee_bps",
+          "type": {
+            "option": "u16"
+          }
+        },
+        {
+          "name": "new_max_utilization_bps",
+          "type": {
+            "option": "u16"
+          }
+        },
+        {
+          "name": "new_position_timeout",
           "type": {
             "option": "i64"
           }
         },
         {
-          "name": "new_rental_fee_rate",
+          "name": "new_close_reward_bps",
           "type": {
-            "option": "u64"
+            "option": "u16"
           }
         },
         {
-          "name": "new_infrastructure_fee",
+          "name": "new_insurance_split_bps",
           "type": {
-            "option": "u64"
+            "option": "u16"
           }
         },
         {
           "name": "new_redemption_fee_bps",
           "type": {
             "option": "u16"
-          }
-        },
-        {
-          "name": "new_grace_period",
-          "type": {
-            "option": "i64"
           }
         },
         {
@@ -1336,7 +1231,7 @@
       ],
       "accounts": [
         {
-          "name": "authority",
+          "name": "withdrawer",
           "writable": true,
           "signer": true
         },
@@ -1361,19 +1256,43 @@
           }
         },
         {
+          "name": "lp_mint",
+          "writable": true
+        },
+        {
+          "name": "withdrawer_lp_ata",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
         {
-          "name": "amount",
+          "name": "lp_amount",
           "type": "u64"
         }
       ]
     }
   ],
   "accounts": [
+    {
+      "name": "InsuranceFund",
+      "discriminator": [
+        43,
+        134,
+        170,
+        87,
+        102,
+        16,
+        142,
+        147
+      ]
+    },
     {
       "name": "LaunchVaultState",
       "discriminator": [
@@ -1416,16 +1335,16 @@
   ],
   "events": [
     {
-      "name": "LaunchBundleEvent",
+      "name": "InsuranceFundUpdatedEvent",
       "discriminator": [
-        219,
-        89,
-        125,
-        163,
-        91,
-        65,
-        17,
-        117
+        200,
+        112,
+        105,
+        226,
+        111,
+        104,
+        63,
+        38
       ]
     },
     {
@@ -1455,6 +1374,58 @@
       ]
     },
     {
+      "name": "PositionClosedEvent",
+      "discriminator": [
+        76,
+        129,
+        10,
+        225,
+        238,
+        51,
+        158,
+        126
+      ]
+    },
+    {
+      "name": "PositionForceClosedEvent",
+      "discriminator": [
+        23,
+        243,
+        247,
+        70,
+        163,
+        70,
+        5,
+        100
+      ]
+    },
+    {
+      "name": "PositionOpenedEvent",
+      "discriminator": [
+        163,
+        1,
+        92,
+        149,
+        138,
+        188,
+        177,
+        23
+      ]
+    },
+    {
+      "name": "PositionSoldEvent",
+      "discriminator": [
+        80,
+        227,
+        123,
+        183,
+        36,
+        162,
+        154,
+        219
+      ]
+    },
+    {
       "name": "ProtocolConfigUpdatedEvent",
       "discriminator": [
         98,
@@ -1481,32 +1452,6 @@
       ]
     },
     {
-      "name": "RentalPaidEvent",
-      "discriminator": [
-        131,
-        205,
-        68,
-        253,
-        146,
-        223,
-        196,
-        123
-      ]
-    },
-    {
-      "name": "TokenBoughtEvent",
-      "discriminator": [
-        71,
-        89,
-        222,
-        124,
-        215,
-        192,
-        230,
-        138
-      ]
-    },
-    {
       "name": "TokenCreatedEvent",
       "discriminator": [
         96,
@@ -1530,58 +1475,6 @@
         235,
         206,
         221
-      ]
-    },
-    {
-      "name": "VaultClosedEvent",
-      "discriminator": [
-        104,
-        71,
-        213,
-        247,
-        195,
-        133,
-        16,
-        106
-      ]
-    },
-    {
-      "name": "VaultCreatedEvent",
-      "discriminator": [
-        81,
-        80,
-        244,
-        58,
-        136,
-        54,
-        236,
-        111
-      ]
-    },
-    {
-      "name": "VaultDefaultedEvent",
-      "discriminator": [
-        103,
-        213,
-        5,
-        55,
-        218,
-        58,
-        165,
-        183
-      ]
-    },
-    {
-      "name": "VaultLiquidatedEvent",
-      "discriminator": [
-        87,
-        47,
-        75,
-        26,
-        204,
-        149,
-        94,
-        109
       ]
     }
   ],
@@ -1638,88 +1531,446 @@
     },
     {
       "code": 6010,
-      "name": "GracePeriodNotExpired",
-      "msg": "Grace period has not expired yet, cannot mark as defaulted"
-    },
-    {
-      "code": 6011,
       "name": "InvalidRedemptionFeeBps",
       "msg": "Redemption fee BPS must be <= 10000"
     },
     {
-      "code": 6012,
-      "name": "InvalidRentalPeriod",
-      "msg": "Rental period must be positive"
-    },
-    {
-      "code": 6013,
-      "name": "InvalidGracePeriod",
-      "msg": "Grace period must be non-negative"
-    },
-    {
-      "code": 6014,
+      "code": 6011,
       "name": "InvalidTreasury",
       "msg": "Invalid treasury account"
     },
     {
-      "code": 6015,
+      "code": 6012,
       "name": "ArithmeticOverflow",
       "msg": "Arithmetic overflow"
     },
     {
-      "code": 6016,
+      "code": 6013,
       "name": "VaultTokenAccountNotEmpty",
       "msg": "Vault token account is not empty"
     },
     {
-      "code": 6017,
+      "code": 6014,
       "name": "ZeroLpAllocation",
       "msg": "LP allocation must be greater than zero"
     },
     {
-      "code": 6018,
+      "code": 6015,
       "name": "ZeroUserContribution",
       "msg": "User contribution must be greater than zero"
     },
     {
-      "code": 6019,
+      "code": 6016,
       "name": "BudgetExceeded",
       "msg": "Max SOL cost exceeds buy budget"
     },
     {
-      "code": 6020,
+      "code": 6017,
       "name": "MaxBuyersExceeded",
       "msg": "Too many buyers in bundle (max 5)"
     },
     {
-      "code": 6021,
+      "code": 6018,
       "name": "BuyParamsMismatch",
       "msg": "Buy amounts and max sol costs must have same length"
     },
     {
-      "code": 6022,
+      "code": 6019,
       "name": "NoBuyers",
       "msg": "At least one buyer required"
     },
     {
-      "code": 6023,
+      "code": 6020,
       "name": "InvalidRemainingAccounts",
       "msg": "Invalid remaining accounts count for bundle"
     },
     {
-      "code": 6024,
+      "code": 6021,
       "name": "InvalidBuyerPda",
       "msg": "Invalid buyer PDA"
     },
     {
-      "code": 6025,
+      "code": 6022,
       "name": "InvalidVaultTokenAccount",
       "msg": "Invalid vault token account"
+    },
+    {
+      "code": 6023,
+      "name": "UtilizationCapReached",
+      "msg": "Pool utilization cap would be exceeded"
+    },
+    {
+      "code": 6024,
+      "name": "PositionNotTimedOut",
+      "msg": "Position has not timed out yet"
+    },
+    {
+      "code": 6025,
+      "name": "InvalidFeeBps",
+      "msg": "Invalid fee BPS value"
+    },
+    {
+      "code": 6026,
+      "name": "InvalidUtilizationBps",
+      "msg": "Invalid utilization BPS value"
+    },
+    {
+      "code": 6027,
+      "name": "InvalidPositionTimeout",
+      "msg": "Position timeout must be positive"
+    },
+    {
+      "code": 6028,
+      "name": "ZeroDepositAmount",
+      "msg": "Deposit amount must be greater than zero"
+    },
+    {
+      "code": 6029,
+      "name": "ZeroWithdrawAmount",
+      "msg": "Withdraw amount must be greater than zero"
+    },
+    {
+      "code": 6030,
+      "name": "InvalidLpTokenAmount",
+      "msg": "Invalid LP token amount"
+    },
+    {
+      "code": 6031,
+      "name": "UnauthorizedSeller",
+      "msg": "Only vault owner or executor can sell position"
+    },
+    {
+      "code": 6032,
+      "name": "SlippageExceeded",
+      "msg": "Minimum SOL output not met"
     }
   ],
   "types": [
     {
-      "name": "LaunchBundleEvent",
+      "name": "InsuranceFund",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "total_sol",
+            "docs": [
+              "Total SOL accumulated in insurance fund (lamports)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "authority",
+            "docs": [
+              "Authority who can withdraw (admin/multisig)"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "InsuranceFundUpdatedEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "new_total",
+            "type": "u64"
+          },
+          {
+            "name": "amount_added",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LaunchVaultState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "token_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "total_token_amount",
+            "docs": [
+              "Total tokens bought at position open"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "remaining_token_amount",
+            "docs": [
+              "Remaining tokens in vault"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_lp_allocation",
+            "docs": [
+              "Total LP allocation from pool (lamports)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "remaining_lp_allocation",
+            "docs": [
+              "Remaining LP to return (lamports)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "user_contribution",
+            "docs": [
+              "User's own SOL contribution (lamports)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "VaultStatus"
+              }
+            }
+          },
+          {
+            "name": "open_timestamp",
+            "docs": [
+              "Unix timestamp when position was opened"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "fee_paid",
+            "docs": [
+              "Total upfront fee paid (lamports)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "num_sub_wallets",
+            "docs": [
+              "Number of PDA sub-wallets used for buying"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LpDepositedEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "depositor",
+            "type": "pubkey"
+          },
+          {
+            "name": "sol_amount",
+            "type": "u64"
+          },
+          {
+            "name": "lp_tokens_minted",
+            "type": "u64"
+          },
+          {
+            "name": "new_total_liquidity",
+            "type": "u64"
+          },
+          {
+            "name": "lp_token_price",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LpPool",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "total_liquidity",
+            "docs": [
+              "Total SOL in pool (lamports) — includes both available and reserved"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reserved_liquidity",
+            "docs": [
+              "SOL reserved for active positions (lamports)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "available_liquidity",
+            "docs": [
+              "SOL available for new positions and LP withdrawals (lamports)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lp_mint",
+            "docs": [
+              "LP token mint address (mimi-LP)"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_mint_supply",
+            "docs": [
+              "Cached LP token supply (mirrors on-chain mint supply)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_defaults",
+            "docs": [
+              "Total number of defaults (for circuit breaker / analytics)"
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "total_positions_closed",
+            "docs": [
+              "Total positions closed (for default rate calculation)"
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LpWithdrawnEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "withdrawer",
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_tokens_burned",
+            "type": "u64"
+          },
+          {
+            "name": "sol_amount",
+            "type": "u64"
+          },
+          {
+            "name": "new_total_liquidity",
+            "type": "u64"
+          },
+          {
+            "name": "lp_token_price",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PositionClosedEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "closer",
+            "type": "pubkey"
+          },
+          {
+            "name": "is_permissionless",
+            "type": "bool"
+          },
+          {
+            "name": "close_reward",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PositionForceClosedEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "executor",
+            "type": "pubkey"
+          },
+          {
+            "name": "token_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "tokens_sold",
+            "type": "u64"
+          },
+          {
+            "name": "sol_recovered",
+            "type": "u64"
+          },
+          {
+            "name": "lp_loss",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PositionOpenedEvent",
       "type": {
         "kind": "struct",
         "fields": [
@@ -1756,6 +2007,10 @@
             "type": "u64"
           },
           {
+            "name": "fee_paid",
+            "type": "u64"
+          },
+          {
             "name": "timestamp",
             "type": "i64"
           }
@@ -1763,12 +2018,16 @@
       }
     },
     {
-      "name": "LaunchVaultState",
+      "name": "PositionSoldEvent",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "user",
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
             "type": "pubkey"
           },
           {
@@ -1776,161 +2035,15 @@
             "type": "pubkey"
           },
           {
-            "name": "total_token_amount",
-            "docs": [
-              "Всего куплено токенов (устанавливается при execute_bundle_buy)"
-            ],
+            "name": "tokens_sold",
             "type": "u64"
           },
           {
-            "name": "remaining_token_amount",
-            "docs": [
-              "Осталось токенов в vault"
-            ],
+            "name": "sol_received",
             "type": "u64"
           },
           {
-            "name": "total_lp_allocation",
-            "docs": [
-              "Общая LP ликвидность задействована (lamports)"
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "remaining_lp_allocation",
-            "docs": [
-              "LP ликвидность к возврату (lamports)"
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "user_contribution",
-            "docs": [
-              "Вклад создателя (lamports)"
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "status",
-            "type": {
-              "defined": {
-                "name": "VaultStatus"
-              }
-            }
-          },
-          {
-            "name": "rental_start_timestamp",
-            "docs": [
-              "Unix timestamp начала аренды"
-            ],
-            "type": "i64"
-          },
-          {
-            "name": "rental_due_timestamp",
-            "docs": [
-              "Дедлайн текущего периода аренды"
-            ],
-            "type": "i64"
-          },
-          {
-            "name": "rental_status",
-            "type": {
-              "defined": {
-                "name": "RentalStatus"
-              }
-            }
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "LpDepositedEvent",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "amount",
-            "type": "u64"
-          },
-          {
-            "name": "new_total_liquidity",
-            "type": "u64"
-          },
-          {
-            "name": "new_available_liquidity",
-            "type": "u64"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "LpPool",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "total_liquidity",
-            "docs": [
-              "Общая ликвидность в пуле (lamports)"
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "reserved_liquidity",
-            "docs": [
-              "Зарезервированная ликвидность (под активные vault'ы)"
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "available_liquidity",
-            "docs": [
-              "Доступная ликвидность (total - reserved)"
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "LpWithdrawnEvent",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "amount",
-            "type": "u64"
-          },
-          {
-            "name": "new_total_liquidity",
-            "type": "u64"
-          },
-          {
-            "name": "new_available_liquidity",
+            "name": "sol_returned_to_pool",
             "type": "u64"
           },
           {
@@ -1958,39 +2071,53 @@
             "type": "pubkey"
           },
           {
-            "name": "rental_period",
+            "name": "fixed_fee",
             "docs": [
-              "Период аренды в секундах (напр. 86400 = 24ч)"
-            ],
-            "type": "i64"
-          },
-          {
-            "name": "rental_fee_rate",
-            "docs": [
-              "Стоимость аренды за период (lamports)"
+              "Fixed fee per position open (lamports)"
             ],
             "type": "u64"
           },
           {
-            "name": "infrastructure_fee",
+            "name": "fee_bps",
             "docs": [
-              "Разовая комиссия за инфраструктуру (lamports)"
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "redemption_fee_bps",
-            "docs": [
-              "Комиссия при выкупе (bps, 10000 = 100%)"
+              "Percentage fee on LP capital (basis points, 200 = 2%)"
             ],
             "type": "u16"
           },
           {
-            "name": "grace_period",
+            "name": "max_utilization_bps",
             "docs": [
-              "Grace period до дефолта (секунды)"
+              "Max utilization of LP pool (basis points, 8500 = 85%)"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "position_timeout",
+            "docs": [
+              "Position timeout in seconds (after which permissionless close is allowed)"
             ],
             "type": "i64"
+          },
+          {
+            "name": "close_reward_bps",
+            "docs": [
+              "Reward for permissionless closer (basis points of returned LP)"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "insurance_split_bps",
+            "docs": [
+              "Percentage of fees routed to insurance fund (basis points, 2000 = 20%)"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "redemption_fee_bps",
+            "docs": [
+              "Fee on token redemption (basis points, 10000 = 100%)"
+            ],
+            "type": "u16"
           },
           {
             "name": "status",
@@ -2041,24 +2168,24 @@
             "type": "pubkey"
           },
           {
-            "name": "rental_period",
+            "name": "fixed_fee",
+            "type": "u64"
+          },
+          {
+            "name": "fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "max_utilization_bps",
+            "type": "u16"
+          },
+          {
+            "name": "position_timeout",
             "type": "i64"
-          },
-          {
-            "name": "rental_fee_rate",
-            "type": "u64"
-          },
-          {
-            "name": "infrastructure_fee",
-            "type": "u64"
           },
           {
             "name": "redemption_fee_bps",
             "type": "u16"
-          },
-          {
-            "name": "grace_period",
-            "type": "i64"
           },
           {
             "name": "timestamp",
@@ -2077,80 +2204,6 @@
           },
           {
             "name": "Paused"
-          }
-        ]
-      }
-    },
-    {
-      "name": "RentalPaidEvent",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "vault",
-            "type": "pubkey"
-          },
-          {
-            "name": "user",
-            "type": "pubkey"
-          },
-          {
-            "name": "rental_fee",
-            "type": "u64"
-          },
-          {
-            "name": "new_rental_due_timestamp",
-            "type": "i64"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "RentalStatus",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "Active"
-          },
-          {
-            "name": "Overdue"
-          }
-        ]
-      }
-    },
-    {
-      "name": "TokenBoughtEvent",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "vault",
-            "type": "pubkey"
-          },
-          {
-            "name": "executor",
-            "type": "pubkey"
-          },
-          {
-            "name": "token_mint",
-            "type": "pubkey"
-          },
-          {
-            "name": "token_amount",
-            "type": "u64"
-          },
-          {
-            "name": "sol_spent",
-            "type": "u64"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
           }
         ]
       }
@@ -2232,137 +2285,10 @@
       }
     },
     {
-      "name": "VaultClosedEvent",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "vault",
-            "type": "pubkey"
-          },
-          {
-            "name": "user",
-            "type": "pubkey"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "VaultCreatedEvent",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "user",
-            "type": "pubkey"
-          },
-          {
-            "name": "token_mint",
-            "type": "pubkey"
-          },
-          {
-            "name": "vault",
-            "type": "pubkey"
-          },
-          {
-            "name": "lp_allocation",
-            "type": "u64"
-          },
-          {
-            "name": "user_contribution",
-            "type": "u64"
-          },
-          {
-            "name": "rental_due_timestamp",
-            "type": "i64"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "VaultDefaultedEvent",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "vault",
-            "type": "pubkey"
-          },
-          {
-            "name": "user",
-            "type": "pubkey"
-          },
-          {
-            "name": "token_mint",
-            "type": "pubkey"
-          },
-          {
-            "name": "remaining_tokens",
-            "type": "u64"
-          },
-          {
-            "name": "remaining_lp",
-            "type": "u64"
-          },
-          {
-            "name": "cranker",
-            "type": "pubkey"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "VaultLiquidatedEvent",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "vault",
-            "type": "pubkey"
-          },
-          {
-            "name": "executor",
-            "type": "pubkey"
-          },
-          {
-            "name": "token_mint",
-            "type": "pubkey"
-          },
-          {
-            "name": "tokens_liquidated",
-            "type": "u64"
-          },
-          {
-            "name": "lp_lost",
-            "type": "u64"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
       "name": "VaultStatus",
       "type": {
         "kind": "enum",
         "variants": [
-          {
-            "name": "ReadyForExecution"
-          },
           {
             "name": "Active"
           },
@@ -2370,7 +2296,7 @@
             "name": "Closed"
           },
           {
-            "name": "Defaulted"
+            "name": "TimedOut"
           }
         ]
       }

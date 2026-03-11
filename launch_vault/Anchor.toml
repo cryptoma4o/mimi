@@ -5,11 +5,11 @@ package_manager = "yarn"
 resolution = true
 skip-lint = false
 
-[programs.localnet]
-launch_vault = "2hpb3dPckVbTf81WoeYt2BybcUZQCevxi1N5DwjaRsL7"
-
 [programs.devnet]
-launch_vault = "2hpb3dPckVbTf81WoeYt2BybcUZQCevxi1N5DwjaRsL7"
+launch_vault = "oNm4QmXFFUXYSYvDkMxW7azSihrViER4Qr1pAUnPvYg"
+
+[programs.localnet]
+launch_vault = "DLGVvhWfYECCNfzbEuxPxckbSYAyMBnEa7Q4WvxHv813"
 
 [registry]
 url = "https://api.apr.dev"

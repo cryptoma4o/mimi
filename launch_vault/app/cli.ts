@@ -249,35 +249,55 @@ async function cmdInit(flags: Record<string, string | boolean>, keypairPath: str
     return;
   }
 
-  const rentalPeriod = parseInt((flags["rental-period"] as string) || "86400", 10);
-  const rentalFee = parseInt((flags["rental-fee"] as string) || "100000", 10);
-  const infraFee = parseInt((flags["infra-fee"] as string) || "50000", 10);
-  const redeemBps = parseInt((flags["redeem-bps"] as string) || "250", 10);
-  const gracePeriod = parseInt((flags["grace-period"] as string) || "3600", 10);
+  const fixedFee = parseInt((flags["fixed-fee"] as string) || "10000000", 10); // 0.01 SOL
+  const feeBps = parseInt((flags["fee-bps"] as string) || "200", 10); // 2%
+  const maxUtilBps = parseInt((flags["max-util-bps"] as string) || "8500", 10); // 85%
+  const positionTimeout = parseInt((flags["position-timeout"] as string) || "3600", 10); // 1h
+  const closeRewardBps = parseInt((flags["close-reward-bps"] as string) || "100", 10); // 1%
+  const insuranceSplitBps = parseInt((flags["insurance-split-bps"] as string) || "2000", 10); // 20%
+  const redeemBps = parseInt((flags["redeem-bps"] as string) || "250", 10); // 2.5%
 
-  console.log(`Rental period:     ${rentalPeriod}s`);
-  console.log(`Rental fee:        ${rentalFee} lamports`);
-  console.log(`Infrastructure fee: ${infraFee} lamports`);
+  console.log(`Fixed fee:         ${fixedFee} lamports (${fixedFee / LAMPORTS_PER_SOL} SOL)`);
+  console.log(`Fee BPS:           ${feeBps} bps`);
+  console.log(`Max utilization:   ${maxUtilBps} bps`);
+  console.log(`Position timeout:  ${positionTimeout}s`);
+  console.log(`Close reward:      ${closeRewardBps} bps`);
+  console.log(`Insurance split:   ${insuranceSplitBps} bps`);
   console.log(`Redemption fee:    ${redeemBps} bps`);
-  console.log(`Grace period:      ${gracePeriod}s`);
   console.log();
+
+  // Derive insurance fund and LP mint PDAs
+  const [insuranceFund] = PublicKey.findProgramAddressSync(
+    [Buffer.from("insurance_fund")],
+    program.programId
+  );
+  const [lpMint] = PublicKey.findProgramAddressSync(
+    [Buffer.from("lp_mint")],
+    program.programId
+  );
 
   try {
     const tx = await program.methods
       .initializeProtocol(
         walletKeypair.publicKey, // executor
         walletKeypair.publicKey, // treasury
-        new anchor.BN(rentalPeriod),
-        new anchor.BN(rentalFee),
-        new anchor.BN(infraFee),
+        new anchor.BN(fixedFee),
+        feeBps,
+        maxUtilBps,
+        new anchor.BN(positionTimeout),
+        closeRewardBps,
+        insuranceSplitBps,
         redeemBps,
-        new anchor.BN(gracePeriod)
       )
       .accounts({
         admin: walletKeypair.publicKey,
         protocolConfig,
         lpPool,
+        insuranceFund,
+        lpMint,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       })
       .preInstructions(preInstructions(priorityFee))
       .rpc({ commitment: "confirmed" });
@@ -308,12 +328,28 @@ async function cmdDepositLp(flags: Record<string, string | boolean>, keypairPath
   const amountLamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
   console.log(`Depositing: ${amountSol} SOL (${amountLamports} lamports)\n`);
 
+  // Derive LP mint and depositor's LP ATA
+  const [lpMint] = PublicKey.findProgramAddressSync(
+    [Buffer.from("lp_mint")],
+    program.programId
+  );
+  const depositorLpAta = getAssociatedTokenAddressSync(
+    lpMint,
+    walletKeypair.publicKey,
+    false,
+    TOKEN_2022_PROGRAM_ID
+  );
+
   try {
     const tx = await program.methods
       .depositLp(new anchor.BN(amountLamports))
       .accounts({
-        authority: walletKeypair.publicKey,
+        depositor: walletKeypair.publicKey,
         lpPool,
+        lpMint,
+        depositorLpAta,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
       .preInstructions(preInstructions(priorityFee))
@@ -595,6 +631,129 @@ async function cmdProxyBuy(flags: Record<string, string | boolean>, keypairPath:
   }
 }
 
+// ── cmdSellPosition ─────────────────────────────────────────────────────────
+
+async function cmdSellPosition(flags: Record<string, string | boolean>, keypairPath: string, rpc: string | null, cluster: string, priorityFee: number) {
+  console.log("=== Launch Vault — Sell Position (PumpFun v2 CPI) ===\n");
+  const { walletKeypair, program, connection } = await setupProvider(keypairPath, rpc, cluster);
+
+  const mint = flags.mint as string;
+  const amountRaw = flags.amount as string;
+  const minSolStr = (flags["min-sol"] as string) || "0";
+
+  if (!mint) {
+    console.error("Usage: yarn cli sell-position --mint <MINT> [--amount <RAW_TOKENS>] [--min-sol <SOL>]");
+    console.error("\n  --mint <PUBKEY>        Token mint address");
+    console.error("  --amount <NUM>         Token amount in raw units (default: sell all)");
+    console.error("  --min-sol <SOL>        Minimum SOL output (default: 0)");
+    process.exit(1);
+  }
+
+  const mintPubkey = new PublicKey(mint);
+  const minSolLamports = new anchor.BN(Math.floor(parseFloat(minSolStr) * LAMPORTS_PER_SOL));
+
+  const { protocolConfig, lpPool } = deriveProtocolPDAs(program.programId);
+  const vaultPDA = deriveVaultPDA(program.programId, walletKeypair.publicKey, mintPubkey);
+
+  // Fetch vault state to get remaining_token_amount and user
+  let vaultData: any;
+  try {
+    vaultData = await (program.account as any).launchVaultState.fetch(vaultPDA);
+  } catch {
+    console.error(`Vault not found for mint ${mint} and wallet ${walletKeypair.publicKey.toBase58()}`);
+    process.exit(1);
+  }
+
+  const remainingTokens = (vaultData.remainingTokenAmount as anchor.BN).toNumber();
+  const sellAmount = amountRaw
+    ? new anchor.BN(amountRaw)
+    : new anchor.BN(remainingTokens);
+
+  if (sellAmount.toNumber() <= 0) {
+    console.error("No tokens to sell (remaining_token_amount = 0)");
+    process.exit(1);
+  }
+  if (sellAmount.toNumber() > remainingTokens) {
+    console.error(`Amount ${sellAmount.toString()} exceeds remaining tokens ${remainingTokens}`);
+    process.exit(1);
+  }
+
+  const vaultTokenAccount = getAssociatedTokenAddressSync(mintPubkey, vaultPDA, true, TOKEN_2022_PROGRAM_ID);
+  const pumpPDAs = derivePumpFunPDAs(mintPubkey);
+
+  // Read fee_recipient from PumpFun global state
+  const globalInfo = await connection.getAccountInfo(pumpPDAs.global);
+  if (!globalInfo) {
+    console.error("Cannot read PumpFun global account. Is PumpFun deployed on this cluster?");
+    process.exit(1);
+  }
+  const feeRecipient = new PublicKey(globalInfo.data.subarray(41, 73));
+
+  // creator_vault: derive from vault owner (token creator), NOT from seller
+  const vaultOwner = vaultData.user as PublicKey;
+  const creatorVault = derivePumpCreatorVault(vaultOwner);
+  const feeConfig = derivePumpFeeConfig();
+  const bondingCurveV2 = derivePumpBondingCurveV2(mintPubkey);
+
+  console.log(`Mint:              ${mint}`);
+  console.log(`Vault PDA:         ${vaultPDA.toBase58()}`);
+  console.log(`Vault owner:       ${vaultOwner.toBase58()}`);
+  console.log(`Remaining tokens:  ${remainingTokens}`);
+  console.log(`Selling:           ${sellAmount.toString()} tokens`);
+  console.log(`Min SOL output:    ${minSolStr} SOL`);
+  console.log(`Fee recipient:     ${feeRecipient.toBase58()}`);
+  console.log(`Creator vault:     ${creatorVault.toBase58()}`);
+  console.log();
+
+  try {
+    const tx = await program.methods
+      .sellPosition(sellAmount, minSolLamports)
+      .accounts({
+        seller: walletKeypair.publicKey,
+        vaultState: vaultPDA,
+        protocolConfig,
+        lpPool,
+        vaultTokenAccount,
+        tokenMint: mintPubkey,
+        pumpProgram: PUMP_FUN_PROGRAM_ID,
+        pumpGlobal: pumpPDAs.global,
+        pumpFeeRecipient: feeRecipient,
+        pumpBondingCurve: pumpPDAs.bondingCurve,
+        pumpAssociatedBondingCurve: pumpPDAs.associatedBondingCurve,
+        pumpEventAuthority: pumpPDAs.eventAuthority,
+        pumpCreatorVault: creatorVault,
+        pumpFeeConfig: feeConfig,
+        pumpBondingCurveV2: bondingCurveV2,
+        pumpFeeProgram: FEE_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+      } as any)
+      .preInstructions(preInstructions(priorityFee))
+      .rpc({ commitment: "confirmed" });
+
+    console.log("=== Sell Position Complete ===\n");
+    console.log(`TX:       ${tx}`);
+    console.log(`Vault:    ${vaultPDA.toBase58()}`);
+    console.log(`Explorer: ${explorerUrl(tx, cluster)}`);
+
+    // Fetch updated vault state
+    try {
+      const updatedVault = await (program.account as any).launchVaultState.fetch(vaultPDA);
+      const newRemaining = (updatedVault.remainingTokenAmount as anchor.BN).toNumber();
+      const newLpAlloc = (updatedVault.remainingLpAllocation as anchor.BN).toNumber();
+      console.log(`\nUpdated vault state:`);
+      console.log(`  Remaining tokens:  ${newRemaining}`);
+      console.log(`  Remaining LP alloc: ${(newLpAlloc / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+      console.log(`  Status:            ${JSON.stringify(updatedVault.status)}`);
+    } catch {}
+  } catch (err: any) {
+    console.error("Transaction failed:");
+    if (err.logs) err.logs.forEach((l: string) => console.error(`  ${l}`));
+    console.error(err.message || err);
+    process.exit(1);
+  }
+}
+
 // ── ALT (Address Lookup Table) helpers for launch-bundle ─────────────────────
 
 const ALT_FILE_PREFIX = ".launch-alt-";
@@ -784,7 +943,7 @@ async function cmdLaunchBundle(flags: Record<string, string | boolean>, keypairP
 
   // --- Build instruction (not legacy TX) ---
   const mainIx = await program.methods
-    .launchBundle(
+    .openPosition(
       name, symbol, uri, isMayhem,
       lpLamports, contribLamports,
       buyAmounts, maxSolCosts
@@ -797,6 +956,7 @@ async function cmdLaunchBundle(flags: Record<string, string | boolean>, keypairP
       protocolConfig,
       lpPool,
       treasury,
+      insuranceFund: PublicKey.findProgramAddressSync([Buffer.from("insurance_fund")], program.programId)[0],
       pumpProgram: PUMP_FUN_PROGRAM_ID,
       pumpGlobal: pumpPDAs.global,
       pumpMintAuthority: pumpPDAs.mintAuthority,
@@ -1038,6 +1198,7 @@ Commands:
   create-vault      Create vault for a token
   proxy-buy         Execute token buy via PumpFun v2 (vault → Active)
   launch-bundle     Atomic: create token + vault + buy tokens in one TX
+  sell-position     Sell tokens via PumpFun v2 CPI
   upload-metadata   Generate and upload token metadata JSON to IPFS
   status            Show protocol status
   help              Show this help
@@ -1075,6 +1236,11 @@ Command-specific options:
     --amount <NUM>          Token amount (raw units)
     --max-sol-cost <SOL>    Maximum SOL to spend
     --fee-recipient <PUBKEY>  PumpFun fee recipient (auto-detected from global)
+
+  sell-position:
+    --mint <PUBKEY>         Token mint address
+    --amount <NUM>          Token amount in raw units (default: sell all)
+    --min-sol <SOL>         Minimum SOL output (default: 0)
 
   launch-bundle:
     --name <NAME>           Token name
@@ -1119,6 +1285,9 @@ Command-specific options:
       break;
     case "launch-bundle":
       await cmdLaunchBundle(flags, keypairPath, rpc, cluster, priorityFee);
+      break;
+    case "sell-position":
+      await cmdSellPosition(flags, keypairPath, rpc, cluster, priorityFee);
       break;
     case "upload-metadata":
       await cmdUploadMetadata(flags);

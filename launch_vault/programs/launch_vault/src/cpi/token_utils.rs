@@ -64,6 +64,85 @@ pub fn build_close_account_instruction(
     }
 }
 
+/// Build SPL Token/Token2022 MintTo instruction (discriminator 7)
+pub fn build_mint_to_instruction(
+    token_program: &Pubkey,
+    mint: &Pubkey,
+    destination: &Pubkey,
+    authority: &Pubkey,
+    amount: u64,
+) -> Instruction {
+    let mut data = Vec::with_capacity(9);
+    data.push(7); // MintTo instruction discriminator
+    data.extend_from_slice(&amount.to_le_bytes());
+
+    Instruction {
+        program_id: *token_program,
+        accounts: vec![
+            AccountMeta::new(*mint, false),
+            AccountMeta::new(*destination, false),
+            AccountMeta::new_readonly(*authority, true),
+        ],
+        data,
+    }
+}
+
+/// Build SPL Token/Token2022 Burn instruction (discriminator 8)
+pub fn build_burn_instruction(
+    token_program: &Pubkey,
+    account: &Pubkey,
+    mint: &Pubkey,
+    authority: &Pubkey,
+    amount: u64,
+) -> Instruction {
+    let mut data = Vec::with_capacity(9);
+    data.push(8); // Burn instruction discriminator
+    data.extend_from_slice(&amount.to_le_bytes());
+
+    Instruction {
+        program_id: *token_program,
+        accounts: vec![
+            AccountMeta::new(*account, false),
+            AccountMeta::new(*mint, false),
+            AccountMeta::new_readonly(*authority, true),
+        ],
+        data,
+    }
+}
+
+/// Build SPL Token/Token2022 InitializeMint2 instruction (discriminator 20)
+/// Sets decimals, mint authority, and optional freeze authority
+pub fn build_initialize_mint2_instruction(
+    token_program: &Pubkey,
+    mint: &Pubkey,
+    decimals: u8,
+    mint_authority: &Pubkey,
+    freeze_authority: Option<&Pubkey>,
+) -> Instruction {
+    let mut data = Vec::with_capacity(67);
+    data.push(20); // InitializeMint2 instruction discriminator
+    data.push(decimals);
+    data.extend_from_slice(mint_authority.as_ref());
+    match freeze_authority {
+        Some(key) => {
+            data.push(1); // COption::Some
+            data.extend_from_slice(key.as_ref());
+        }
+        None => {
+            data.push(0); // COption::None
+            data.extend_from_slice(&[0u8; 32]);
+        }
+    }
+
+    Instruction {
+        program_id: *token_program,
+        accounts: vec![
+            AccountMeta::new(*mint, false),
+        ],
+        data,
+    }
+}
+
 /// Build basic SPL Token transfer instruction (discriminator 3).
 /// Works for both Token and Token2022 (tokens without transfer hooks/fees).
 pub fn build_token_transfer_instruction(

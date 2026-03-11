@@ -1,6 +1,7 @@
 "use client";
 
 import { PublicKey } from "@solana/web3.js";
+import { BN } from "@coral-xyz/anchor";
 import { useQuery } from "@tanstack/react-query";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Program, AnchorProvider } from "@coral-xyz/anchor";
@@ -8,7 +9,7 @@ import { IDL, type LaunchVault } from "@/lib/idl";
 import { useProgram } from "@/hooks/useProgram";
 import { VaultStatusBadge } from "./VaultStatusBadge";
 import { RedeemForm } from "./RedeemForm";
-import { buildPayRental, buildCloseVault } from "@/lib/transactions";
+import { buildSellPosition, buildClosePosition } from "@/lib/transactions";
 import { deriveVaultATA } from "@/lib/pda";
 import { useProtocolConfig } from "@/hooks/useProtocolConfig";
 import {
@@ -16,7 +17,6 @@ import {
   formatTokens,
   shortenAddress,
   formatTimestamp,
-  formatDuration,
   explorerAccountUrl,
 } from "@/lib/format";
 import { parseAnchorError } from "@/lib/errors";
@@ -47,10 +47,15 @@ function useVault(address: string) {
 
 export function VaultDetail({ address }: VaultDetailProps) {
   const { publicKey } = useWallet();
+  const { connection } = useConnection();
   const { program } = useProgram();
   const { data: vault, isLoading } = useVault(address);
   const { data: config } = useProtocolConfig();
   const [actionLoading, setActionLoading] = useState("");
+
+  // Sell form state
+  const [sellAmount, setSellAmount] = useState("");
+  const [minSolOutput, setMinSolOutput] = useState("");
 
   if (isLoading) {
     return <div className="animate-pulse h-64 bg-gray-800 rounded-xl" />;
@@ -67,36 +72,54 @@ export function VaultDetail({ address }: VaultDetailProps) {
   const statusKey = Object.keys(vault.status)[0] || "active";
   const isOwner = publicKey && vault.user.toBase58() === publicKey.toBase58();
   const isActive = statusKey === "active";
-  const isClosed = statusKey === "closed" || statusKey === "defaulted";
+  const isClosed = statusKey === "closed" || statusKey === "timedOut";
 
   const now = Math.floor(Date.now() / 1000);
-  const dueTs = Number(vault.rentalDueTimestamp);
-  const timeLeft = dueTs - now;
+  const openedTs = Number(vault.openedAt);
+  const positionTimeout = config ? Number((config as any).positionTimeout) : 0;
+  const expiresAt = openedTs + positionTimeout;
+  const timeLeft = expiresAt - now;
 
   const vaultPubkey = new PublicKey(address);
   const vaultAta = deriveVaultATA(vaultPubkey, vault.tokenMint);
 
-  const handlePayRental = async () => {
-    if (!program || !publicKey || !config) return;
-    setActionLoading("rental");
+  const handleSellPosition = async () => {
+    if (!program || !publicKey) return;
+    const amount = parseInt(sellAmount) || 0;
+    const minOut = parseFloat(minSolOutput) || 0;
+    if (amount <= 0) {
+      toast.error("Enter a token amount to sell");
+      return;
+    }
+
+    setActionLoading("sell");
     try {
-      const treasury = (config as any).treasury as PublicKey;
-      await buildPayRental(program, publicKey, vaultPubkey, treasury);
-      toast.success("Rental paid!");
+      await buildSellPosition(
+        program,
+        connection,
+        publicKey,
+        vaultPubkey,
+        vault.tokenMint,
+        new BN(amount),
+        new BN(Math.round(minOut * 1e9))
+      );
+      toast.success("Tokens sold!");
+      setSellAmount("");
+      setMinSolOutput("");
     } catch (err: any) {
-      toast.error(parseAnchorError(err) || err.message || "Failed");
+      toast.error(parseAnchorError(err) || err.message || "Sell failed");
       console.error(err);
     } finally {
       setActionLoading("");
     }
   };
 
-  const handleCloseVault = async () => {
+  const handleClosePosition = async () => {
     if (!program || !publicKey) return;
     setActionLoading("close");
     try {
-      await buildCloseVault(program, publicKey, vaultPubkey, vaultAta);
-      toast.success("Vault closed!");
+      await buildClosePosition(program, publicKey, vaultPubkey, vault.user, vaultAta);
+      toast.success("Position closed!");
     } catch (err: any) {
       toast.error(parseAnchorError(err) || err.message || "Failed");
       console.error(err);
@@ -110,7 +133,7 @@ export function VaultDetail({ address }: VaultDetailProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-white">Vault Details</h1>
+          <h1 className="text-xl font-bold text-white">Position Details</h1>
           <p className="text-sm text-gray-400 font-mono mt-1">{address}</p>
         </div>
         <VaultStatusBadge status={vault.status} />
@@ -134,18 +157,16 @@ export function VaultDetail({ address }: VaultDetailProps) {
         <InfoCard label="User Contribution">
           {formatSol(Number(vault.userContribution))} SOL
         </InfoCard>
-        <InfoCard label="Rental Started">
-          {Number(vault.rentalStartTimestamp) > 0
-            ? formatTimestamp(Number(vault.rentalStartTimestamp))
-            : "Not started"}
+        <InfoCard label="Opened At">
+          {openedTs > 0 ? formatTimestamp(openedTs) : "N/A"}
         </InfoCard>
-        {isActive && (
-          <InfoCard label="Rental Due">
+        {isActive && positionTimeout > 0 && (
+          <InfoCard label="Expires">
             <span className={timeLeft < 3600 ? "text-red-400" : "text-white"}>
-              {dueTs > 0 ? formatTimestamp(dueTs) : "N/A"}
+              {formatTimestamp(expiresAt)}
               {timeLeft > 0 && (
                 <span className="text-gray-400 text-xs ml-2">
-                  ({formatDuration(timeLeft)} left)
+                  ({Math.floor(timeLeft / 3600)}h {Math.floor((timeLeft % 3600) / 60)}m left)
                 </span>
               )}
             </span>
@@ -153,42 +174,73 @@ export function VaultDetail({ address }: VaultDetailProps) {
         )}
       </div>
 
-      {/* Actions */}
+      {/* Owner Actions */}
       {isOwner && isActive && (
         <div className="space-y-4">
-          <div className="flex gap-3">
+          {/* Sell Position */}
+          <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 space-y-3">
+            <h3 className="text-white font-medium">Sell Tokens via PumpFun</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">
+                  Token Amount (max: {formatTokens(Number(vault.remainingTokenAmount))})
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={sellAmount}
+                  onChange={(e) => setSellAmount(e.target.value)}
+                  placeholder="1000000"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 text-sm focus:outline-none focus:border-violet-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Min SOL Output</label>
+                <input
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  value={minSolOutput}
+                  onChange={(e) => setMinSolOutput(e.target.value)}
+                  placeholder="0.1"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 text-sm focus:outline-none focus:border-violet-500"
+                />
+              </div>
+            </div>
             <button
-              onClick={handlePayRental}
-              disabled={actionLoading === "rental"}
-              className="bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg transition text-sm font-medium"
+              onClick={handleSellPosition}
+              disabled={actionLoading === "sell"}
+              className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-medium py-2 rounded-lg transition text-sm"
             >
-              {actionLoading === "rental" ? "Paying..." : "Pay Rental"}
-            </button>
-            <button
-              onClick={handleCloseVault}
-              disabled={actionLoading === "close"}
-              className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg transition text-sm font-medium"
-            >
-              {actionLoading === "close" ? "Closing..." : "Close Vault"}
+              {actionLoading === "sell" ? "Selling..." : "Sell Position"}
             </button>
           </div>
+
+          {/* Close Position */}
+          <button
+            onClick={handleClosePosition}
+            disabled={actionLoading === "close"}
+            className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg transition text-sm font-medium"
+          >
+            {actionLoading === "close" ? "Closing..." : "Close Position"}
+          </button>
 
           <RedeemForm vaultAddress={vaultPubkey} vault={vault} />
         </div>
       )}
 
-      {statusKey === "readyForExecution" && (
-        <div className="bg-yellow-900/30 border border-yellow-800 rounded-lg p-4">
-          <p className="text-yellow-400 text-sm">
-            Waiting for executor to buy tokens via PumpFun...
+      {statusKey === "timedOut" && (
+        <div className="bg-red-900/30 border border-red-800 rounded-lg p-4">
+          <p className="text-red-400 text-sm">
+            This position has timed out. An executor can force-close it.
           </p>
         </div>
       )}
 
-      {isClosed && (
+      {isClosed && statusKey === "closed" && (
         <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
           <p className="text-gray-400 text-sm">
-            This vault is {statusKey}. No further actions available.
+            This position is closed. No further actions available.
           </p>
         </div>
       )}

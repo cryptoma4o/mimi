@@ -7,7 +7,7 @@ import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { useProgram } from "@/hooks/useProgram";
 import { useProtocolConfig } from "@/hooks/useProtocolConfig";
 import { useLpPool } from "@/hooks/useLpPool";
-import { buildLaunchBundle } from "@/lib/transactions";
+import { buildOpenPosition } from "@/lib/transactions";
 import { explorerUrl, explorerAccountUrl } from "@/lib/format";
 import { parseAnchorError } from "@/lib/errors";
 import toast from "react-hot-toast";
@@ -36,7 +36,7 @@ export function LaunchBundleForm() {
   const [uri, setUri] = useState("");
   const [isMayhem, setIsMayhem] = useState(false);
 
-  // Step 2: Vault config
+  // Step 2: Position config
   const [lpAllocation, setLpAllocation] = useState("");
   const [userContribution, setUserContribution] = useState("");
 
@@ -66,8 +66,10 @@ export function LaunchBundleForm() {
   // Computed values
   const lpSol = parseFloat(lpAllocation) || 0;
   const contribSol = parseFloat(userContribution) || 0;
-  const infraFee = config ? Number((config as any).infrastructureFee) / LAMPORTS_PER_SOL : 0;
-  const rentalFee = config ? Number((config as any).rentalFeeRate) / LAMPORTS_PER_SOL : 0;
+  const fixedFee = config ? Number((config as any).fixedFee) / LAMPORTS_PER_SOL : 0;
+  const feeBps = config ? Number((config as any).feeBps) : 0;
+  const percentFee = (lpSol * feeBps) / 10000;
+  const totalFee = fixedFee + percentFee;
   const totalBuyBudget = lpSol + contribSol;
   const totalMaxSol = buyers.reduce((sum, b) => sum + (parseFloat(b.maxSolCost) || 0), 0);
   const availableLp = pool ? Number((pool as any).availableLiquidity) / LAMPORTS_PER_SOL : 0;
@@ -84,7 +86,7 @@ export function LaunchBundleForm() {
       const buyAmounts = buyers.map(b => new BN(parseInt(b.tokenAmount)));
       const maxSolCosts = buyers.map(b => new BN(Math.round(parseFloat(b.maxSolCost) * LAMPORTS_PER_SOL)));
 
-      const { tx, mint, vaultPDA } = await buildLaunchBundle(
+      const { tx, mint, vaultPDA } = await buildOpenPosition(
         program,
         connection,
         publicKey,
@@ -101,7 +103,7 @@ export function LaunchBundleForm() {
       );
 
       setResult({ tx, mint: mint.toBase58(), vault: vaultPDA.toBase58() });
-      toast.success("Launch Bundle executed!");
+      toast.success("Position opened!");
     } catch (err: any) {
       const msg = parseAnchorError(err) || err.message || "Transaction failed";
       toast.error(msg);
@@ -115,7 +117,7 @@ export function LaunchBundleForm() {
     return (
       <div className="max-w-lg space-y-4">
         <div className="bg-green-900/30 border border-green-800 rounded-xl p-6 space-y-3">
-          <h2 className="text-green-400 text-lg font-bold">Launch Complete!</h2>
+          <h2 className="text-green-400 text-lg font-bold">Position Opened!</h2>
           <div className="text-sm space-y-2">
             <div>
               <span className="text-gray-400">Token Mint: </span>
@@ -125,7 +127,7 @@ export function LaunchBundleForm() {
               </a>
             </div>
             <div>
-              <span className="text-gray-400">Vault: </span>
+              <span className="text-gray-400">Position: </span>
               <a href={`/vault/${result.vault}`}
                 className="text-violet-400 hover:text-violet-300 font-mono break-all">
                 {result.vault}
@@ -143,7 +145,7 @@ export function LaunchBundleForm() {
             onClick={() => { setResult(null); setStep(1); }}
             className="mt-4 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm transition"
           >
-            Launch Another
+            Open Another
           </button>
         </div>
       </div>
@@ -196,15 +198,15 @@ export function LaunchBundleForm() {
             disabled={!canProceed1}
             className="w-full bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white font-medium py-2.5 rounded-lg transition"
           >
-            Next: Vault Config
+            Next: Position Config
           </button>
         </div>
       )}
 
-      {/* Step 2: Vault Config */}
+      {/* Step 2: Position Config */}
       {step === 2 && (
         <div className="space-y-4">
-          <h2 className="text-white font-semibold text-lg">Step 2: Vault Config</h2>
+          <h2 className="text-white font-semibold text-lg">Step 2: Position Config</h2>
           {pool && (
             <p className="text-sm text-gray-500">Available LP: {availableLp.toFixed(4)} SOL</p>
           )}
@@ -224,8 +226,9 @@ export function LaunchBundleForm() {
           </div>
           <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-3 text-sm space-y-1">
             <p className="text-gray-400">Total buy budget: <span className="text-white">{totalBuyBudget.toFixed(4)} SOL</span></p>
-            <p className="text-gray-400">Infra fee: <span className="text-white">{infraFee.toFixed(6)} SOL</span></p>
-            <p className="text-gray-400">Rental fee: <span className="text-white">{rentalFee.toFixed(6)} SOL</span></p>
+            <p className="text-gray-400">Fixed fee: <span className="text-white">{fixedFee.toFixed(6)} SOL</span></p>
+            <p className="text-gray-400">LP fee ({(feeBps / 100).toFixed(1)}%): <span className="text-white">{percentFee.toFixed(6)} SOL</span></p>
+            <p className="text-gray-400 border-t border-gray-700 pt-1 mt-1">Total fee: <span className="text-yellow-400">{totalFee.toFixed(6)} SOL</span></p>
           </div>
           <div className="flex gap-2">
             <button onClick={() => setStep(1)} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2.5 rounded-lg transition">Back</button>
@@ -292,7 +295,7 @@ export function LaunchBundleForm() {
       {/* Step 4: Review & Launch */}
       {step === 4 && (
         <div className="space-y-4">
-          <h2 className="text-white font-semibold text-lg">Step 4: Review & Launch</h2>
+          <h2 className="text-white font-semibold text-lg">Step 4: Review & Open Position</h2>
           <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 text-sm space-y-2">
             <h3 className="text-white font-medium mb-2">Token</h3>
             <p className="text-gray-400">Name: <span className="text-white">{name}</span></p>
@@ -301,11 +304,11 @@ export function LaunchBundleForm() {
             {isMayhem && <p className="text-yellow-400">Mayhem mode enabled</p>}
           </div>
           <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 text-sm space-y-2">
-            <h3 className="text-white font-medium mb-2">Vault</h3>
+            <h3 className="text-white font-medium mb-2">Position</h3>
             <p className="text-gray-400">LP Allocation: <span className="text-white">{lpSol} SOL</span></p>
             <p className="text-gray-400">User Contribution: <span className="text-white">{contribSol} SOL</span></p>
-            <p className="text-gray-400">Fees: <span className="text-white">{(infraFee + rentalFee).toFixed(6)} SOL</span></p>
-            <p className="text-gray-400">Total cost: <span className="text-yellow-400">{(contribSol + infraFee + rentalFee).toFixed(6)} SOL</span></p>
+            <p className="text-gray-400">Fees: <span className="text-white">{totalFee.toFixed(6)} SOL</span></p>
+            <p className="text-gray-400">Total cost: <span className="text-yellow-400">{(contribSol + totalFee).toFixed(6)} SOL</span></p>
           </div>
           <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 text-sm space-y-2">
             <h3 className="text-white font-medium mb-2">Buyers ({buyers.length})</h3>
@@ -320,7 +323,7 @@ export function LaunchBundleForm() {
             <button onClick={() => setStep(3)} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2.5 rounded-lg transition">Back</button>
             <button onClick={handleLaunch} disabled={loading || !publicKey}
               className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-medium py-2.5 rounded-lg transition">
-              {loading ? "Launching..." : "Launch Bundle"}
+              {loading ? "Opening..." : "Open Position"}
             </button>
           </div>
         </div>

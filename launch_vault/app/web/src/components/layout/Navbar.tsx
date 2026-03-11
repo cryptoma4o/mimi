@@ -37,16 +37,10 @@ export function Navbar() {
                 Create Token
               </Link>
               <Link
-                href="/vault/create"
-                className="text-sm text-gray-400 hover:text-white transition"
-              >
-                Create Vault
-              </Link>
-              <Link
                 href="/launch"
                 className="text-sm text-violet-400 hover:text-violet-300 font-medium transition"
               >
-                Launch
+                Open Position
               </Link>
               <Link
                 href="/admin"

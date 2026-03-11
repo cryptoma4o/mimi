@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { BN } from "@coral-xyz/anchor";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { useProgram } from "@/hooks/useProgram";
 import { useLpPool } from "@/hooks/useLpPool";
 import { useAllVaults } from "@/hooks/useAllVaults";
@@ -11,7 +11,7 @@ import { VaultStatusBadge } from "@/components/vault/VaultStatusBadge";
 import {
   buildDepositLp,
   buildWithdrawLp,
-  buildProxyBuyToken,
+  buildForceClosePosition,
 } from "@/lib/transactions";
 import {
   formatSol,
@@ -21,7 +21,7 @@ import {
 import { parseAnchorError } from "@/lib/errors";
 import toast from "react-hot-toast";
 
-type Tab = "lp" | "executor" | "vaults";
+type Tab = "lp" | "forceClose" | "vaults";
 
 export default function AdminPage() {
   const { connected } = useWallet();
@@ -40,7 +40,7 @@ export default function AdminPage() {
       <h1 className="text-2xl font-bold text-white mb-6">Admin Panel</h1>
 
       <div className="flex gap-2 mb-6">
-        {(["lp", "executor", "vaults"] as Tab[]).map((tab) => (
+        {(["lp", "forceClose", "vaults"] as Tab[]).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -50,13 +50,13 @@ export default function AdminPage() {
                 : "bg-gray-800 text-gray-400 hover:text-white"
             }`}
           >
-            {tab === "lp" ? "LP Management" : tab === "executor" ? "Executor Actions" : "All Vaults"}
+            {tab === "lp" ? "LP Management" : tab === "forceClose" ? "Force Close" : "All Positions"}
           </button>
         ))}
       </div>
 
       {activeTab === "lp" && <LpManagement />}
-      {activeTab === "executor" && <ExecutorActions />}
+      {activeTab === "forceClose" && <ForceClosePanel />}
       {activeTab === "vaults" && <AllVaultsTable />}
     </div>
   );
@@ -95,15 +95,15 @@ function LpManagement() {
 
   const handleWithdraw = async () => {
     if (!program || !publicKey) return;
-    const sol = parseFloat(withdrawAmount);
-    if (!sol || sol <= 0) {
-      toast.error("Enter a valid amount");
+    const lpAmount = parseFloat(withdrawAmount);
+    if (!lpAmount || lpAmount <= 0) {
+      toast.error("Enter a valid LP token amount");
       return;
     }
     setLoading("withdraw");
     try {
-      await buildWithdrawLp(program, publicKey, sol);
-      toast.success(`Withdrew ${sol} SOL`);
+      await buildWithdrawLp(program, publicKey, new BN(Math.round(lpAmount * 1e9)));
+      toast.success(`Withdrew LP tokens`);
       setWithdrawAmount("");
       refetch();
     } catch (err: any) {
@@ -160,7 +160,7 @@ function LpManagement() {
         </div>
 
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-          <h3 className="text-white font-medium mb-3">Withdraw SOL</h3>
+          <h3 className="text-white font-medium mb-3">Withdraw (LP Tokens)</h3>
           <div className="flex gap-2">
             <input
               type="number"
@@ -168,7 +168,7 @@ function LpManagement() {
               min="0"
               value={withdrawAmount}
               onChange={(e) => setWithdrawAmount(e.target.value)}
-              placeholder="Amount in SOL"
+              placeholder="LP token amount"
               className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500"
             />
             <button
@@ -185,50 +185,35 @@ function LpManagement() {
   );
 }
 
-// ── Executor Actions ────────────────────────────────────────────────────
+// ── Force Close Panel ──────────────────────────────────────────────────
 
-function ExecutorActions() {
+function ForceClosePanel() {
   const { publicKey } = useWallet();
+  const { connection } = useConnection();
   const { program } = useProgram();
   const { data: vaults } = useAllVaults();
   const [loading, setLoading] = useState("");
 
-  const readyVaults =
+  const timedOutVaults =
     vaults?.filter((v: any) => {
       const key = Object.keys(v.account.status)[0];
-      return key === "readyForExecution";
+      return key === "timedOut";
     }) || [];
 
-  const [buyAmounts, setBuyAmounts] = useState<Record<string, string>>({});
-  const [maxCosts, setMaxCosts] = useState<Record<string, string>>({});
-
-  const handleProxyBuy = async (vaultPubkey: PublicKey, vault: any) => {
+  const handleForceClose = async (vaultPubkey: PublicKey, vault: any) => {
     if (!program || !publicKey) return;
     const key = vaultPubkey.toBase58();
-    const tokenAmount = parseInt(buyAmounts[key] || "0");
-    const maxSol = parseFloat(maxCosts[key] || "0");
-
-    if (tokenAmount <= 0 || maxSol <= 0) {
-      toast.error("Enter valid token amount and max SOL cost");
-      return;
-    }
-
     setLoading(key);
     try {
-      // Fee recipient needs to be read from PumpFun global state
-      // For now, use a known fee recipient from the protocol config
-      const feeRecipient = new PublicKey("62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV");
-
-      await buildProxyBuyToken(
+      await buildForceClosePosition(
         program,
+        connection,
         publicKey,
         vaultPubkey,
         vault.tokenMint,
-        new BN(tokenAmount),
-        new BN(Math.round(maxSol * 1e9)),
-        feeRecipient
+        vault.user
       );
-      toast.success("Proxy buy executed!");
+      toast.success("Position force-closed!");
     } catch (err: any) {
       toast.error(parseAnchorError(err) || err.message || "Failed");
       console.error(err);
@@ -237,17 +222,17 @@ function ExecutorActions() {
     }
   };
 
-  if (readyVaults.length === 0) {
+  if (timedOutVaults.length === 0) {
     return (
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 text-center">
-        <p className="text-gray-500">No vaults waiting for execution.</p>
+        <p className="text-gray-500">No timed-out positions to force-close.</p>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      {readyVaults.map((v: any) => {
+      {timedOutVaults.map((v: any) => {
         const key = v.publicKey.toBase58();
         return (
           <div
@@ -270,39 +255,17 @@ function ExecutorActions() {
                 <p className="text-white">{formatSol(Number(v.account.totalLpAllocation))} SOL</p>
               </div>
               <div>
-                <span className="text-gray-500">User Contribution</span>
-                <p className="text-white">{formatSol(Number(v.account.userContribution))} SOL</p>
+                <span className="text-gray-500">Tokens Remaining</span>
+                <p className="text-white">{formatTokens(Number(v.account.remainingTokenAmount))}</p>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 mb-3">
-              <input
-                type="number"
-                value={buyAmounts[key] || ""}
-                onChange={(e) =>
-                  setBuyAmounts((p) => ({ ...p, [key]: e.target.value }))
-                }
-                placeholder="Token amount"
-                className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 text-sm focus:outline-none focus:border-violet-500"
-              />
-              <input
-                type="number"
-                step="0.01"
-                value={maxCosts[key] || ""}
-                onChange={(e) =>
-                  setMaxCosts((p) => ({ ...p, [key]: e.target.value }))
-                }
-                placeholder="Max SOL cost"
-                className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 text-sm focus:outline-none focus:border-violet-500"
-              />
-            </div>
-
             <button
-              onClick={() => handleProxyBuy(v.publicKey, v.account)}
+              onClick={() => handleForceClose(v.publicKey, v.account)}
               disabled={loading === key}
-              className="w-full bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white py-2 rounded-lg transition text-sm font-medium"
+              className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white py-2 rounded-lg transition text-sm font-medium"
             >
-              {loading === key ? "Executing..." : "Proxy Buy"}
+              {loading === key ? "Force Closing..." : "Force Close Position"}
             </button>
           </div>
         );
@@ -331,7 +294,7 @@ function AllVaultsTable() {
   return (
     <div className="space-y-4">
       <div className="flex gap-2">
-        {["all", "readyForExecution", "active", "closed", "defaulted"].map((s) => (
+        {["all", "active", "closed", "timedOut"].map((s) => (
           <button
             key={s}
             onClick={() => setStatusFilter(s)}
@@ -341,19 +304,19 @@ function AllVaultsTable() {
                 : "bg-gray-800 text-gray-400 hover:text-white"
             }`}
           >
-            {s === "all" ? "All" : s === "readyForExecution" ? "Ready" : s.charAt(0).toUpperCase() + s.slice(1)}
+            {s === "all" ? "All" : s === "timedOut" ? "Timed Out" : s.charAt(0).toUpperCase() + s.slice(1)}
           </button>
         ))}
       </div>
 
       {filtered.length === 0 ? (
-        <p className="text-gray-500 text-center py-8">No vaults found.</p>
+        <p className="text-gray-500 text-center py-8">No positions found.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-gray-500 border-b border-gray-800">
-                <th className="text-left py-2 px-3">Vault</th>
+                <th className="text-left py-2 px-3">Position</th>
                 <th className="text-left py-2 px-3">Owner</th>
                 <th className="text-left py-2 px-3">Mint</th>
                 <th className="text-right py-2 px-3">Tokens</th>

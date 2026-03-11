@@ -15,6 +15,8 @@ import {
 import {
   deriveProtocolConfig,
   deriveLpPool,
+  deriveInsuranceFund,
+  deriveLpMint,
   deriveVaultPDA,
   deriveVaultATA,
   derivePumpFunPDAs,
@@ -64,269 +66,9 @@ export async function buildProxyCreateToken(
   return { tx, mint };
 }
 
-// ── createVault ─────────────────────────────────────────────────────────
+// ── openPosition (atomic: create token + vault + buy) ───────────────────
 
-export async function buildCreateVault(
-  program: Program<LaunchVault>,
-  user: PublicKey,
-  tokenMint: PublicKey,
-  lpAllocationSol: number,
-  userContributionSol: number,
-  treasury: PublicKey
-) {
-  const vaultState = deriveVaultPDA(user, tokenMint);
-  const vaultTokenAccount = deriveVaultATA(vaultState, tokenMint);
-  const protocolConfig = deriveProtocolConfig();
-  const lpPool = deriveLpPool();
-
-  const tx = await program.methods
-    .createVault(
-      new BN(Math.round(lpAllocationSol * LAMPORTS_PER_SOL)),
-      new BN(Math.round(userContributionSol * LAMPORTS_PER_SOL))
-    )
-    .accounts({
-      user,
-      tokenMint,
-      vaultState,
-      vaultTokenAccount,
-      protocolConfig,
-      lpPool,
-      treasury,
-      systemProgram: SystemProgram.programId,
-      tokenProgram: TOKEN_2022_PROGRAM_ID,
-      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-    } as any)
-    .rpc();
-
-  return { tx, vaultState };
-}
-
-// ── payRental ───────────────────────────────────────────────────────────
-
-export async function buildPayRental(
-  program: Program<LaunchVault>,
-  user: PublicKey,
-  vaultState: PublicKey,
-  treasury: PublicKey
-) {
-  const protocolConfig = deriveProtocolConfig();
-
-  return program.methods
-    .payRental()
-    .accounts({
-      user,
-      vaultState,
-      protocolConfig,
-      treasury,
-      systemProgram: SystemProgram.programId,
-    } as any)
-    .rpc();
-}
-
-// ── redeemTokens ────────────────────────────────────────────────────────
-
-export async function buildRedeemTokens(
-  program: Program<LaunchVault>,
-  user: PublicKey,
-  vaultState: PublicKey,
-  tokenMint: PublicKey,
-  amount: BN
-) {
-  const vaultTokenAccount = deriveVaultATA(vaultState, tokenMint);
-  const userTokenAccount = getAssociatedTokenAddressSync(
-    tokenMint,
-    user,
-    false,
-    TOKEN_2022_PROGRAM_ID
-  );
-  const lpPool = deriveLpPool();
-  const protocolConfig = deriveProtocolConfig();
-
-  // Read treasury from config
-  const config = await program.account.protocolConfig.fetch(protocolConfig);
-  const treasury = (config as any).treasury as PublicKey;
-
-  // Create user's Token2022 ATA if it doesn't exist yet
-  const createAtaIx = createAssociatedTokenAccountIdempotentInstruction(
-    user,            // payer
-    userTokenAccount, // ata
-    user,            // owner
-    tokenMint,       // mint
-    TOKEN_2022_PROGRAM_ID,
-    ASSOCIATED_TOKEN_PROGRAM_ID
-  );
-
-  return program.methods
-    .redeemTokens(amount)
-    .accounts({
-      user,
-      vaultState,
-      userTokenAccount,
-      vaultTokenAccount,
-      tokenMint,
-      lpPool,
-      treasury,
-      tokenProgram: TOKEN_2022_PROGRAM_ID,
-      systemProgram: SystemProgram.programId,
-    } as any)
-    .preInstructions([createAtaIx])
-    .rpc();
-}
-
-// ── closeVault ──────────────────────────────────────────────────────────
-
-export async function buildCloseVault(
-  program: Program<LaunchVault>,
-  user: PublicKey,
-  vaultState: PublicKey,
-  vaultTokenAccount: PublicKey
-) {
-  return program.methods
-    .closeVault()
-    .accounts({
-      user,
-      vaultState,
-      vaultTokenAccount,
-      tokenProgram: TOKEN_2022_PROGRAM_ID,
-      systemProgram: SystemProgram.programId,
-    } as any)
-    .rpc();
-}
-
-// ── depositLp ───────────────────────────────────────────────────────────
-
-export async function buildDepositLp(
-  program: Program<LaunchVault>,
-  authority: PublicKey,
-  amountSol: number
-) {
-  const lpPool = deriveLpPool();
-
-  return program.methods
-    .depositLp(new BN(Math.round(amountSol * LAMPORTS_PER_SOL)))
-    .accounts({
-      authority,
-      lpPool,
-      systemProgram: SystemProgram.programId,
-    } as any)
-    .rpc();
-}
-
-// ── withdrawLp ──────────────────────────────────────────────────────────
-
-export async function buildWithdrawLp(
-  program: Program<LaunchVault>,
-  authority: PublicKey,
-  amountSol: number
-) {
-  const lpPool = deriveLpPool();
-
-  return program.methods
-    .withdrawLp(new BN(Math.round(amountSol * LAMPORTS_PER_SOL)))
-    .accounts({
-      authority,
-      lpPool,
-      systemProgram: SystemProgram.programId,
-    } as any)
-    .rpc();
-}
-
-// ── proxyBuyToken (executor) ────────────────────────────────────────────
-
-export async function buildProxyBuyToken(
-  program: Program<LaunchVault>,
-  executor: PublicKey,
-  vaultState: PublicKey,
-  tokenMint: PublicKey,
-  tokenAmount: BN,
-  maxSolLamports: BN,
-  feeRecipient: PublicKey
-) {
-  const protocolConfig = deriveProtocolConfig();
-  const lpPool = deriveLpPool();
-  const vaultTokenAccount = deriveVaultATA(vaultState, tokenMint);
-  const executorTokenAccount = getAssociatedTokenAddressSync(
-    tokenMint,
-    executor,
-    false,
-    TOKEN_2022_PROGRAM_ID
-  );
-  const pumpPDAs = derivePumpFunPDAs(tokenMint);
-  const userVolumeAccumulator = derivePumpUserVolumeAccumulator(executor);
-  const creatorVault = derivePumpCreatorVault(executor);
-  const feeConfig = derivePumpFeeConfig();
-  const bondingCurveV2 = derivePumpBondingCurveV2(tokenMint);
-
-  return program.methods
-    .proxyBuyToken(tokenAmount, maxSolLamports)
-    .accounts({
-      executor,
-      vaultState,
-      protocolConfig,
-      lpPool,
-      vaultTokenAccount,
-      executorTokenAccount,
-      tokenMint,
-      pumpProgram: PUMP_FUN_PROGRAM_ID,
-      pumpGlobal: pumpPDAs.global,
-      pumpFeeRecipient: feeRecipient,
-      pumpBondingCurve: pumpPDAs.bondingCurve,
-      pumpAssociatedBondingCurve: pumpPDAs.associatedBondingCurve,
-      pumpEventAuthority: pumpPDAs.eventAuthority,
-      pumpGlobalVolumeAccumulator: pumpPDAs.globalVolumeAccumulator,
-      pumpUserVolumeAccumulator: userVolumeAccumulator,
-      pumpCreatorVault: creatorVault,
-      pumpFeeConfig: feeConfig,
-      pumpBondingCurveV2: bondingCurveV2,
-      pumpFeeProgram: FEE_PROGRAM_ID,
-      systemProgram: SystemProgram.programId,
-      tokenProgram: TOKEN_2022_PROGRAM_ID,
-      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-    } as any)
-    .rpc();
-}
-
-// ── updateProtocolConfig (admin) ────────────────────────────────────────
-
-export async function buildUpdateProtocolConfig(
-  program: Program<LaunchVault>,
-  admin: PublicKey,
-  updates: {
-    newExecutor?: PublicKey | null;
-    newTreasury?: PublicKey | null;
-    newRentalPeriod?: BN | null;
-    newRentalFee?: BN | null;
-    newInfraFee?: BN | null;
-    newRedeemBps?: number | null;
-    newGracePeriod?: BN | null;
-    newAdmin?: PublicKey | null;
-    newStatus?: any | null;
-  }
-) {
-  const protocolConfig = deriveProtocolConfig();
-
-  return program.methods
-    .updateProtocolConfig(
-      updates.newExecutor ?? null,
-      updates.newTreasury ?? null,
-      updates.newRentalPeriod ?? null,
-      updates.newRentalFee ?? null,
-      updates.newInfraFee ?? null,
-      updates.newRedeemBps ?? null,
-      updates.newGracePeriod ?? null,
-      updates.newAdmin ?? null,
-      updates.newStatus ?? null
-    )
-    .accounts({
-      admin,
-      protocolConfig,
-    } as any)
-    .rpc();
-}
-
-// ── launchBundle (atomic: create token + vault + buy) ───────────────────
-
-export async function buildLaunchBundle(
+export async function buildOpenPosition(
   program: Program<LaunchVault>,
   connection: { getAccountInfo: (pubkey: PublicKey) => Promise<any> },
   user: PublicKey,
@@ -353,6 +95,7 @@ export async function buildLaunchBundle(
 
   const protocolConfig = deriveProtocolConfig();
   const lpPool = deriveLpPool();
+  const insuranceFund = deriveInsuranceFund();
   const vaultPDA = deriveVaultPDA(user, mint);
   const vaultATA = deriveVaultATA(vaultPDA, mint);
   const pumpPDAs = derivePumpFunPDAs(mint);
@@ -386,7 +129,7 @@ export async function buildLaunchBundle(
   }
 
   const tx = await program.methods
-    .launchBundle(
+    .openPosition(
       args.name,
       args.symbol,
       args.uri,
@@ -404,6 +147,7 @@ export async function buildLaunchBundle(
       protocolConfig,
       lpPool,
       treasury,
+      insuranceFund,
       pumpProgram: PUMP_FUN_PROGRAM_ID,
       pumpGlobal: pumpPDAs.global,
       pumpMintAuthority: pumpPDAs.mintAuthority,
@@ -431,4 +175,294 @@ export async function buildLaunchBundle(
     .rpc();
 
   return { tx, mint, vaultPDA };
+}
+
+// ── sellPosition ────────────────────────────────────────────────────────
+
+export async function buildSellPosition(
+  program: Program<LaunchVault>,
+  connection: { getAccountInfo: (pubkey: PublicKey) => Promise<any> },
+  seller: PublicKey,
+  vaultState: PublicKey,
+  tokenMint: PublicKey,
+  amount: BN,
+  minSolOutput: BN,
+  vaultOwner?: PublicKey
+) {
+  const protocolConfig = deriveProtocolConfig();
+  const lpPool = deriveLpPool();
+  const vaultTokenAccount = deriveVaultATA(vaultState, tokenMint);
+  const pumpPDAs = derivePumpFunPDAs(tokenMint);
+  // creator_vault must derive from the token creator (vault owner), not the seller
+  const creatorVault = derivePumpCreatorVault(vaultOwner ?? seller);
+  const feeConfig = derivePumpFeeConfig();
+  const bondingCurveV2 = derivePumpBondingCurveV2(tokenMint);
+
+  // Read fee_recipient from PumpFun global state
+  const globalInfo = await connection.getAccountInfo(pumpPDAs.global);
+  if (!globalInfo) throw new Error("Cannot read PumpFun global account");
+  const feeRecipient = new PublicKey(globalInfo.data.subarray(41, 73));
+
+  return program.methods
+    .sellPosition(amount, minSolOutput)
+    .accounts({
+      seller,
+      vaultState,
+      protocolConfig,
+      lpPool,
+      vaultTokenAccount,
+      tokenMint,
+      pumpProgram: PUMP_FUN_PROGRAM_ID,
+      pumpGlobal: pumpPDAs.global,
+      pumpFeeRecipient: feeRecipient,
+      pumpBondingCurve: pumpPDAs.bondingCurve,
+      pumpAssociatedBondingCurve: pumpPDAs.associatedBondingCurve,
+      pumpEventAuthority: pumpPDAs.eventAuthority,
+      pumpCreatorVault: creatorVault,
+      pumpFeeConfig: feeConfig,
+      pumpBondingCurveV2: bondingCurveV2,
+      pumpFeeProgram: FEE_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+      tokenProgram: TOKEN_2022_PROGRAM_ID,
+    } as any)
+    .rpc();
+}
+
+// ── closePosition ──────────────────────────────────────────────────────
+
+export async function buildClosePosition(
+  program: Program<LaunchVault>,
+  closer: PublicKey,
+  vaultState: PublicKey,
+  vaultOwner: PublicKey,
+  vaultTokenAccount: PublicKey
+) {
+  const protocolConfig = deriveProtocolConfig();
+  const lpPool = deriveLpPool();
+
+  return program.methods
+    .closePosition()
+    .accounts({
+      closer,
+      vaultState,
+      protocolConfig,
+      lpPool,
+      vaultOwner,
+      vaultTokenAccount,
+      tokenProgram: TOKEN_2022_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+    } as any)
+    .rpc();
+}
+
+// ── forceClosePosition (executor) ──────────────────────────────────────
+
+export async function buildForceClosePosition(
+  program: Program<LaunchVault>,
+  connection: { getAccountInfo: (pubkey: PublicKey) => Promise<any> },
+  executor: PublicKey,
+  vaultState: PublicKey,
+  tokenMint: PublicKey,
+  vaultOwner: PublicKey
+) {
+  const protocolConfig = deriveProtocolConfig();
+  const lpPool = deriveLpPool();
+  const vaultTokenAccount = deriveVaultATA(vaultState, tokenMint);
+  const pumpPDAs = derivePumpFunPDAs(tokenMint);
+  // creator_vault must derive from the token creator (vault owner), not the executor
+  const creatorVault = derivePumpCreatorVault(vaultOwner);
+  const feeConfig = derivePumpFeeConfig();
+  const bondingCurveV2 = derivePumpBondingCurveV2(tokenMint);
+
+  // Read fee_recipient from PumpFun global state
+  const globalInfo = await connection.getAccountInfo(pumpPDAs.global);
+  if (!globalInfo) throw new Error("Cannot read PumpFun global account");
+  const feeRecipient = new PublicKey(globalInfo.data.subarray(41, 73));
+
+  return program.methods
+    .forceClosePosition()
+    .accounts({
+      executor,
+      vaultState,
+      protocolConfig,
+      lpPool,
+      vaultTokenAccount,
+      tokenMint,
+      pumpProgram: PUMP_FUN_PROGRAM_ID,
+      pumpGlobal: pumpPDAs.global,
+      pumpFeeRecipient: feeRecipient,
+      pumpBondingCurve: pumpPDAs.bondingCurve,
+      pumpAssociatedBondingCurve: pumpPDAs.associatedBondingCurve,
+      pumpEventAuthority: pumpPDAs.eventAuthority,
+      pumpCreatorVault: creatorVault,
+      pumpFeeConfig: feeConfig,
+      pumpBondingCurveV2: bondingCurveV2,
+      pumpFeeProgram: FEE_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+      tokenProgram: TOKEN_2022_PROGRAM_ID,
+    } as any)
+    .rpc();
+}
+
+// ── redeemTokens ────────────────────────────────────────────────────────
+
+export async function buildRedeemTokens(
+  program: Program<LaunchVault>,
+  user: PublicKey,
+  vaultState: PublicKey,
+  tokenMint: PublicKey,
+  amount: BN
+) {
+  const vaultTokenAccount = deriveVaultATA(vaultState, tokenMint);
+  const userTokenAccount = getAssociatedTokenAddressSync(
+    tokenMint,
+    user,
+    false,
+    TOKEN_2022_PROGRAM_ID
+  );
+  const lpPool = deriveLpPool();
+  const protocolConfig = deriveProtocolConfig();
+
+  // Read treasury from config
+  const config = await program.account.protocolConfig.fetch(protocolConfig);
+  const treasury = (config as any).treasury as PublicKey;
+
+  // Create user's Token2022 ATA if it doesn't exist yet
+  const createAtaIx = createAssociatedTokenAccountIdempotentInstruction(
+    user,
+    userTokenAccount,
+    user,
+    tokenMint,
+    TOKEN_2022_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  );
+
+  return program.methods
+    .redeemTokens(amount)
+    .accounts({
+      user,
+      vaultState,
+      protocolConfig,
+      lpPool,
+      treasury,
+      vaultTokenAccount,
+      userTokenAccount,
+      tokenMint,
+      systemProgram: SystemProgram.programId,
+      tokenProgram: TOKEN_2022_PROGRAM_ID,
+    } as any)
+    .preInstructions([createAtaIx])
+    .rpc();
+}
+
+// ── depositLp ───────────────────────────────────────────────────────────
+
+export async function buildDepositLp(
+  program: Program<LaunchVault>,
+  depositor: PublicKey,
+  amountSol: number
+) {
+  const lpPool = deriveLpPool();
+  const lpMint = deriveLpMint();
+  const depositorLpAta = getAssociatedTokenAddressSync(
+    lpMint,
+    depositor,
+    false,
+    TOKEN_2022_PROGRAM_ID
+  );
+
+  // Create depositor's LP ATA if it doesn't exist yet
+  const createAtaIx = createAssociatedTokenAccountIdempotentInstruction(
+    depositor,
+    depositorLpAta,
+    depositor,
+    lpMint,
+    TOKEN_2022_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  );
+
+  return program.methods
+    .depositLp(new BN(Math.round(amountSol * LAMPORTS_PER_SOL)))
+    .accounts({
+      depositor,
+      lpPool,
+      lpMint,
+      depositorLpAta,
+      tokenProgram: TOKEN_2022_PROGRAM_ID,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+    } as any)
+    .preInstructions([createAtaIx])
+    .rpc();
+}
+
+// ── withdrawLp ──────────────────────────────────────────────────────────
+
+export async function buildWithdrawLp(
+  program: Program<LaunchVault>,
+  withdrawer: PublicKey,
+  lpAmount: BN
+) {
+  const lpPool = deriveLpPool();
+  const lpMint = deriveLpMint();
+  const withdrawerLpAta = getAssociatedTokenAddressSync(
+    lpMint,
+    withdrawer,
+    false,
+    TOKEN_2022_PROGRAM_ID
+  );
+
+  return program.methods
+    .withdrawLp(lpAmount)
+    .accounts({
+      withdrawer,
+      lpPool,
+      lpMint,
+      withdrawerLpAta,
+      tokenProgram: TOKEN_2022_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+    } as any)
+    .rpc();
+}
+
+// ── updateProtocolConfig (admin) ────────────────────────────────────────
+
+export async function buildUpdateProtocolConfig(
+  program: Program<LaunchVault>,
+  admin: PublicKey,
+  updates: {
+    newExecutor?: PublicKey | null;
+    newTreasury?: PublicKey | null;
+    newFixedFee?: BN | null;
+    newFeeBps?: number | null;
+    newMaxUtilizationBps?: number | null;
+    newPositionTimeout?: BN | null;
+    newCloseRewardBps?: number | null;
+    newInsuranceSplitBps?: number | null;
+    newRedemptionFeeBps?: number | null;
+    newAdmin?: PublicKey | null;
+    newStatus?: any | null;
+  }
+) {
+  const protocolConfig = deriveProtocolConfig();
+
+  return program.methods
+    .updateProtocolConfig(
+      updates.newExecutor ?? null,
+      updates.newTreasury ?? null,
+      updates.newFixedFee ?? null,
+      updates.newFeeBps ?? null,
+      updates.newMaxUtilizationBps ?? null,
+      updates.newPositionTimeout ?? null,
+      updates.newCloseRewardBps ?? null,
+      updates.newInsuranceSplitBps ?? null,
+      updates.newRedemptionFeeBps ?? null,
+      updates.newAdmin ?? null,
+      updates.newStatus ?? null
+    )
+    .accounts({
+      admin,
+      protocolConfig,
+    } as any)
+    .rpc();
 }

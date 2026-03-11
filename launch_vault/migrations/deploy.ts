@@ -1,5 +1,7 @@
 import * as anchor from "@coral-xyz/anchor";
-import { PublicKey, SystemProgram } from "@solana/web3.js";
+import { PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
+
+const TOKEN_2022_PROGRAM_ID = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
 module.exports = async function (provider: anchor.AnchorProvider) {
   anchor.setProvider(provider);
@@ -17,6 +19,14 @@ module.exports = async function (provider: anchor.AnchorProvider) {
     [Buffer.from("lp_pool")],
     program.programId
   );
+  const [insuranceFund] = PublicKey.findProgramAddressSync(
+    [Buffer.from("insurance_fund")],
+    program.programId
+  );
+  const [lpMint] = PublicKey.findProgramAddressSync(
+    [Buffer.from("lp_mint")],
+    program.programId
+  );
 
   // Check if already initialized
   const configAccount = await provider.connection.getAccountInfo(protocolConfig);
@@ -31,19 +41,25 @@ module.exports = async function (provider: anchor.AnchorProvider) {
 
   const tx = await program.methods
     .initializeProtocol(
-      admin,                       // executor (default: admin)
-      admin,                       // treasury (default: admin)
-      new anchor.BN(86400),        // rental_period: 24h
-      new anchor.BN(100_000),      // rental_fee_rate: 0.0001 SOL
-      new anchor.BN(50_000),       // infrastructure_fee: 0.00005 SOL
-      250,                         // redemption_fee_bps: 2.5%
-      new anchor.BN(3600),         // grace_period: 1h
+      admin,                          // executor (default: admin)
+      admin,                          // treasury (default: admin)
+      new anchor.BN(10_000_000),      // fixed_fee: 0.01 SOL
+      200,                            // fee_bps: 2%
+      8500,                           // max_utilization_bps: 85%
+      new anchor.BN(3600),            // position_timeout: 1 hour
+      100,                            // close_reward_bps: 1%
+      2000,                           // insurance_split_bps: 20%
+      250,                            // redemption_fee_bps: 2.5%
     )
     .accounts({
       admin,
       protocolConfig,
       lpPool,
+      insuranceFund,
+      lpMint,
+      tokenProgram: TOKEN_2022_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
+      rent: SYSVAR_RENT_PUBKEY,
     })
     .rpc();
 

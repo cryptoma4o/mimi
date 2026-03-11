@@ -11,31 +11,27 @@ use crate::cpi::token_utils::{
     build_transfer_checked_instruction,
 };
 use crate::errors::LaunchVaultError;
-use crate::events::LaunchBundleEvent;
+use crate::events::PositionOpenedEvent;
 use crate::state::*;
 
-/// Maximum number of buyers in a single bundle
 const MAX_BUYERS: usize = pump_fun::MAX_BUYERS;
 
 #[derive(Accounts)]
-pub struct LaunchBundle<'info> {
+pub struct OpenPosition<'info> {
     // === Signers ===
-    /// Token creator, pays fees + user_contribution
     #[account(mut)]
     pub user: Signer<'info>,
 
-    /// Fresh keypair for new token mint
     #[account(mut)]
     pub mint: Signer<'info>,
 
-    /// Authorized executor
     #[account(
         constraint = executor.key() == protocol_config.executor @ LaunchVaultError::UnauthorizedExecutor,
     )]
     pub executor: Signer<'info>,
 
     // === Protocol state ===
-    /// CHECK: vault_state PDA — initialized manually in handler (mint doesn't exist at deserialization time)
+    /// CHECK: vault_state PDA — initialized manually in handler
     #[account(mut)]
     pub vault_state: UncheckedAccount<'info>,
 
@@ -60,21 +56,27 @@ pub struct LaunchBundle<'info> {
     )]
     pub treasury: UncheckedAccount<'info>,
 
-    // === Pump.fun accounts (shared for create + buy) ===
-    /// CHECK: Pump.fun program ID verified in constraint
+    /// CHECK: Insurance fund PDA
     #[account(
-        constraint = pump_program.key() == pump_fun::PUMP_FUN_PROGRAM_ID
+        mut,
+        seeds = [b"insurance_fund"],
+        bump,
     )]
+    pub insurance_fund: UncheckedAccount<'info>,
+
+    // === Pump.fun accounts ===
+    /// CHECK: Pump.fun program ID
+    #[account(constraint = pump_program.key() == pump_fun::PUMP_FUN_PROGRAM_ID)]
     pub pump_program: UncheckedAccount<'info>,
 
-    /// CHECK: Pump global state PDA ["global"]
+    /// CHECK: Pump global state PDA
     #[account(mut)]
     pub pump_global: UncheckedAccount<'info>,
 
-    /// CHECK: Mint authority PDA ["mint-authority"]
+    /// CHECK: Mint authority PDA
     pub pump_mint_authority: UncheckedAccount<'info>,
 
-    /// CHECK: Bonding curve PDA ["bonding-curve", mint]
+    /// CHECK: Bonding curve PDA
     #[account(mut)]
     pub pump_bonding_curve: UncheckedAccount<'info>,
 
@@ -82,19 +84,16 @@ pub struct LaunchBundle<'info> {
     #[account(mut)]
     pub pump_associated_bonding_curve: UncheckedAccount<'info>,
 
-    /// CHECK: Event authority PDA ["__event_authority"]
+    /// CHECK: Event authority PDA
     pub pump_event_authority: UncheckedAccount<'info>,
 
     /// CHECK: Pump.fun fee recipient
     #[account(mut)]
     pub pump_fee_recipient: UncheckedAccount<'info>,
 
-    // === Mayhem accounts (for create_v2) ===
+    // === Mayhem accounts ===
     /// CHECK: Mayhem program
-    #[account(
-        mut,
-        constraint = mayhem_program.key() == pump_fun::MAYHEM_PROGRAM_ID
-    )]
+    #[account(mut, constraint = mayhem_program.key() == pump_fun::MAYHEM_PROGRAM_ID)]
     pub mayhem_program: UncheckedAccount<'info>,
 
     /// CHECK: Mayhem global params PDA
@@ -104,7 +103,7 @@ pub struct LaunchBundle<'info> {
     #[account(mut)]
     pub mayhem_sol_vault: UncheckedAccount<'info>,
 
-    /// CHECK: Mayhem state PDA ["mayhem-state", mint]
+    /// CHECK: Mayhem state PDA
     #[account(mut)]
     pub mayhem_state: UncheckedAccount<'info>,
 
@@ -116,20 +115,18 @@ pub struct LaunchBundle<'info> {
     /// CHECK: PumpFun global_volume_accumulator PDA
     pub pump_global_volume_accumulator: UncheckedAccount<'info>,
 
-    /// CHECK: PumpFun creator_vault PDA ["creator-vault", creator]
+    /// CHECK: PumpFun creator_vault PDA
     #[account(mut)]
     pub pump_creator_vault: UncheckedAccount<'info>,
 
-    /// CHECK: PumpFun fee_config PDA (from Fee Program)
+    /// CHECK: PumpFun fee_config PDA
     pub pump_fee_config: UncheckedAccount<'info>,
 
-    /// CHECK: PumpFun bonding_curve_v2 PDA ["bonding-curve-v2", mint]
+    /// CHECK: PumpFun bonding_curve_v2 PDA
     pub pump_bonding_curve_v2: UncheckedAccount<'info>,
 
     /// CHECK: PumpFun Fee Program
-    #[account(
-        constraint = pump_fee_program.key() == pump_fun::FEE_PROGRAM_ID
-    )]
+    #[account(constraint = pump_fee_program.key() == pump_fun::FEE_PROGRAM_ID)]
     pub pump_fee_program: UncheckedAccount<'info>,
 
     // === System ===
@@ -143,21 +140,17 @@ pub struct LaunchBundle<'info> {
     pub rent: Sysvar<'info, Rent>,
 
     // === remaining_accounts ===
-    // [vault_token_account, buyer_0_pda, buyer_0_ata, buyer_0_vol, buyer_1_pda, buyer_1_ata, buyer_1_vol, ...]
-    // Count: 1 + num_buyers * 3
+    // [vault_token_account, buyer_0_pda, buyer_0_ata, buyer_0_vol, ...]
 }
 
 pub fn handler<'info>(
-    ctx: Context<'_, '_, '_, 'info, LaunchBundle<'info>>,
-    // Token creation params
+    ctx: Context<'_, '_, '_, 'info, OpenPosition<'info>>,
     name: String,
     symbol: String,
     uri: String,
     is_mayhem_mode: bool,
-    // Vault params
     lp_allocation: u64,
     user_contribution: u64,
-    // Buy params (per buyer)
     buy_amounts: Vec<u64>,
     max_sol_costs: Vec<u64>,
 ) -> Result<()> {
@@ -165,10 +158,7 @@ pub fn handler<'info>(
     let num_buyers = buy_amounts.len();
     require!(num_buyers > 0, LaunchVaultError::NoBuyers);
     require!(num_buyers <= MAX_BUYERS, LaunchVaultError::MaxBuyersExceeded);
-    require!(
-        buy_amounts.len() == max_sol_costs.len(),
-        LaunchVaultError::BuyParamsMismatch
-    );
+    require!(buy_amounts.len() == max_sol_costs.len(), LaunchVaultError::BuyParamsMismatch);
     require!(lp_allocation > 0, LaunchVaultError::ZeroLpAllocation);
     require!(user_contribution > 0, LaunchVaultError::ZeroUserContribution);
     require!(
@@ -176,7 +166,24 @@ pub fn handler<'info>(
         LaunchVaultError::InsufficientLpLiquidity
     );
 
-    // remaining_accounts: [vault_ata, buyer0_pda, buyer0_ata, buyer0_vol, ...]
+    // Utilization cap check
+    let pool = &ctx.accounts.lp_pool;
+    let new_reserved = pool
+        .reserved_liquidity
+        .checked_add(lp_allocation)
+        .ok_or(LaunchVaultError::ArithmeticOverflow)?;
+    if pool.total_liquidity > 0 {
+        let utilization_bps = (new_reserved as u128)
+            .checked_mul(10_000)
+            .ok_or(LaunchVaultError::ArithmeticOverflow)?
+            .checked_div(pool.total_liquidity as u128)
+            .ok_or(LaunchVaultError::ArithmeticOverflow)? as u16;
+        require!(
+            utilization_bps <= ctx.accounts.protocol_config.max_utilization_bps,
+            LaunchVaultError::UtilizationCapReached
+        );
+    }
+
     let expected_remaining = 1 + num_buyers * 3;
     require!(
         ctx.remaining_accounts.len() == expected_remaining,
@@ -194,9 +201,61 @@ pub fn handler<'info>(
 
     require!(total_max_sol <= buy_budget, LaunchVaultError::BudgetExceeded);
 
+    // ========================================================
+    // STEP 1: Calculate and pay upfront fees
+    // ========================================================
+    let config = &ctx.accounts.protocol_config;
+    let percentage_fee = (lp_allocation as u128)
+        .checked_mul(config.fee_bps as u128)
+        .ok_or(LaunchVaultError::ArithmeticOverflow)?
+        .checked_div(10_000)
+        .ok_or(LaunchVaultError::ArithmeticOverflow)? as u64;
+
+    let total_fee = config
+        .fixed_fee
+        .checked_add(percentage_fee)
+        .ok_or(LaunchVaultError::ArithmeticOverflow)?;
+
+    let insurance_amount = (total_fee as u128)
+        .checked_mul(config.insurance_split_bps as u128)
+        .ok_or(LaunchVaultError::ArithmeticOverflow)?
+        .checked_div(10_000)
+        .ok_or(LaunchVaultError::ArithmeticOverflow)? as u64;
+
+    let treasury_amount = total_fee
+        .checked_sub(insurance_amount)
+        .ok_or(LaunchVaultError::ArithmeticOverflow)?;
+
+    // Fee → treasury
+    if treasury_amount > 0 {
+        system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                system_program::Transfer {
+                    from: ctx.accounts.user.to_account_info(),
+                    to: ctx.accounts.treasury.to_account_info(),
+                },
+            ),
+            treasury_amount,
+        )?;
+    }
+
+    // Fee → insurance fund
+    if insurance_amount > 0 {
+        system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                system_program::Transfer {
+                    from: ctx.accounts.user.to_account_info(),
+                    to: ctx.accounts.insurance_fund.to_account_info(),
+                },
+            ),
+            insurance_amount,
+        )?;
+    }
 
     // ========================================================
-    // STEP 1: CPI create_v2 — create token on Pump.fun
+    // STEP 2: CPI create_v2 — create token on Pump.fun
     // ========================================================
     let create_ix = pump_fun::build_create_v2_instruction(
         &ctx.accounts.mint.key(),
@@ -243,9 +302,8 @@ pub fn handler<'info>(
         ],
     )?;
 
-
     // ========================================================
-    // STEP 2: Initialize vault_state PDA manually
+    // STEP 3: Initialize vault_state PDA manually
     // ========================================================
     let mint_key = ctx.accounts.mint.key();
     let user_key = ctx.accounts.user.key();
@@ -257,7 +315,7 @@ pub fn handler<'info>(
     );
     require!(
         ctx.accounts.vault_state.key() == vault_pda,
-        LaunchVaultError::InvalidVaultStatus // reuse error for PDA mismatch
+        LaunchVaultError::InvalidVaultStatus
     );
 
     let vault_seeds: &[&[u8]] = &[
@@ -286,9 +344,8 @@ pub fn handler<'info>(
         &[vault_seeds],
     )?;
 
-
     // ========================================================
-    // STEP 3: Create vault ATA via CPI
+    // STEP 4: Create vault ATA
     // ========================================================
     let vault_ata_info = &ctx.remaining_accounts[0];
 
@@ -311,63 +368,26 @@ pub fn handler<'info>(
         ],
     )?;
 
-
     // ========================================================
-    // STEP 4: Pay fees + reserve LP
+    // STEP 5: Reserve LP allocation (total_liquidity unchanged —
+    // the pool's exposure is tracked via reserved_liquidity)
     // ========================================================
-    let config = &ctx.accounts.protocol_config;
-    let fees_to_treasury = config
-        .infrastructure_fee
-        .checked_add(config.rental_fee_rate)
-        .ok_or(LaunchVaultError::ArithmeticOverflow)?;
-
-    // Fees → treasury
-    system_program::transfer(
-        CpiContext::new(
-            ctx.accounts.system_program.to_account_info(),
-            system_program::Transfer {
-                from: ctx.accounts.user.to_account_info(),
-                to: ctx.accounts.treasury.to_account_info(),
-            },
-        ),
-        fees_to_treasury,
-    )?;
-
-    // user_contribution → lp_pool
-    system_program::transfer(
-        CpiContext::new(
-            ctx.accounts.system_program.to_account_info(),
-            system_program::Transfer {
-                from: ctx.accounts.user.to_account_info(),
-                to: ctx.accounts.lp_pool.to_account_info(),
-            },
-        ),
-        user_contribution,
-    )?;
-
-    // Track user_contribution in total_liquidity + reserve full buy_budget
     let lp_pool = &mut ctx.accounts.lp_pool;
-    lp_pool.total_liquidity = lp_pool
-        .total_liquidity
-        .checked_add(user_contribution)
-        .ok_or(LaunchVaultError::ArithmeticOverflow)?;
     lp_pool.reserved_liquidity = lp_pool
         .reserved_liquidity
-        .checked_add(buy_budget)
+        .checked_add(lp_allocation)
         .ok_or(LaunchVaultError::ArithmeticOverflow)?;
     lp_pool.available_liquidity = lp_pool
         .total_liquidity
         .checked_sub(lp_pool.reserved_liquidity)
         .ok_or(LaunchVaultError::ArithmeticOverflow)?;
 
-
     // ========================================================
-    // STEP 5: Loop — fund buyer PDAs + CPI buy + transfer tokens to vault
+    // STEP 6: Loop — fund buyer PDAs + CPI buy + transfer tokens to vault
     // ========================================================
     let mut total_tokens_bought: u64 = 0;
     let mut total_sol_spent: u64 = 0;
 
-    // Distribute buy_budget proportionally based on max_sol_costs
     for i in 0..num_buyers {
         let buyer_pda_info = &ctx.remaining_accounts[1 + i * 3];
         let buyer_ata_info = &ctx.remaining_accounts[1 + i * 3 + 1];
@@ -375,7 +395,6 @@ pub fn handler<'info>(
 
         let buyer_index = i as u8;
 
-        // Verify buyer PDA
         let (expected_buyer_pda, buyer_bump) = Pubkey::find_program_address(
             &[pump_fun::BUYER_SEED, vault_pda.as_ref(), &[buyer_index]],
             program_id,
@@ -394,8 +413,7 @@ pub fn handler<'info>(
 
         let sol_for_this_buyer = max_sol_costs[i];
 
-        // a) Fund buyer PDA: user fronts SOL via system_program::transfer
-        //    (LP pool will reimburse user after the loop)
+        // Fund buyer PDA
         system_program::transfer(
             CpiContext::new(
                 ctx.accounts.system_program.to_account_info(),
@@ -407,8 +425,7 @@ pub fn handler<'info>(
             sol_for_this_buyer,
         )?;
 
-
-        // b) Create buyer ATA via CPI
+        // Create buyer ATA
         invoke(
             &build_create_ata_instruction(
                 &user_key,
@@ -428,8 +445,7 @@ pub fn handler<'info>(
             ],
         )?;
 
-
-        // c) CPI buy on Pump.fun (buyer PDA as signer)
+        // CPI buy on Pump.fun
         let buyer_user_vol_acc = pump_fun::derive_user_volume_accumulator(&expected_buyer_pda);
 
         let buy_ix = pump_fun::build_buy_instruction(
@@ -476,11 +492,10 @@ pub fn handler<'info>(
             &[buyer_seeds],
         )?;
 
-
-        // d) Read actual tokens received from Pump.fun buy
+        // Read actual tokens received
         let actual_tokens = crate::cpi::token_utils::read_token_account_amount(buyer_ata_info)?;
 
-        // e) Transfer tokens: buyer ATA → vault ATA (Token2022 transfer_checked)
+        // Transfer tokens: buyer ATA → vault ATA
         let transfer_ix = build_transfer_checked_instruction(
             &ctx.accounts.token_program.key(),
             &buyer_ata_info.key(),
@@ -488,7 +503,7 @@ pub fn handler<'info>(
             &vault_ata_info.key(),
             &expected_buyer_pda,
             actual_tokens,
-            6, // Pump.fun tokens typically have 6 decimals
+            6,
         );
 
         invoke_signed(
@@ -507,7 +522,7 @@ pub fn handler<'info>(
             .checked_add(actual_tokens)
             .ok_or(LaunchVaultError::ArithmeticOverflow)?;
 
-        // f) Close buyer ATA, return rent to user
+        // Close buyer ATA, return rent to user
         let close_ix = build_close_account_instruction(
             &ctx.accounts.token_program.key(),
             &buyer_ata_info.key(),
@@ -525,7 +540,7 @@ pub fn handler<'info>(
             &[buyer_seeds],
         )?;
 
-        // g) Return unused SOL from buyer PDA to user
+        // Return unused SOL from buyer PDA to user
         let buyer_lamports = buyer_pda_info.lamports();
         if buyer_lamports > 0 {
             let spent = sol_for_this_buyer.saturating_sub(buyer_lamports);
@@ -533,7 +548,6 @@ pub fn handler<'info>(
                 .checked_add(spent)
                 .ok_or(LaunchVaultError::ArithmeticOverflow)?;
 
-            // Return all remaining lamports via CPI (buyer_pda owned by System Program)
             invoke_signed(
                 &system_instruction::transfer(
                     &expected_buyer_pda,
@@ -554,70 +568,57 @@ pub fn handler<'info>(
         }
     }
 
-
-    // Reimburse user from lp_pool for the SOL they fronted during buys.
-    // The user fronted total_sol_spent, and lp_pool should cover it.
-    if total_sol_spent > 0 {
-        **ctx.accounts.lp_pool.to_account_info().try_borrow_mut_lamports()? -= total_sol_spent;
-        **ctx.accounts.user.to_account_info().try_borrow_mut_lamports()? += total_sol_spent;
+    // Reimburse user for the LP pool's share of buy costs.
+    // User fronted all SOL; pool repays min(total_sol_spent, lp_allocation).
+    let pool_share = total_sol_spent.min(lp_allocation);
+    if pool_share > 0 {
+        **ctx.accounts.lp_pool.to_account_info().try_borrow_mut_lamports()? -= pool_share;
+        **ctx.accounts.user.to_account_info().try_borrow_mut_lamports()? += pool_share;
     }
 
+    // Adjust reservation to actual deployment: if buys cost less than
+    // lp_allocation (favorable slippage), unreserve the unused portion.
+    let actual_lp_deployed = pool_share;
+    let unused_allocation = lp_allocation.saturating_sub(actual_lp_deployed);
+    if unused_allocation > 0 {
+        let lp_pool = &mut ctx.accounts.lp_pool;
+        lp_pool.reserved_liquidity = lp_pool
+            .reserved_liquidity
+            .checked_sub(unused_allocation)
+            .ok_or(LaunchVaultError::ArithmeticOverflow)?;
+        lp_pool.available_liquidity = lp_pool
+            .total_liquidity
+            .checked_sub(lp_pool.reserved_liquidity)
+            .ok_or(LaunchVaultError::ArithmeticOverflow)?;
+    }
 
     // ========================================================
-    // STEP 6: Write vault state manually
+    // STEP 7: Write vault state
     // ========================================================
     let clock = Clock::get()?;
-    let rental_due = clock
-        .unix_timestamp
-        .checked_add(config.rental_period)
-        .ok_or(LaunchVaultError::ArithmeticOverflow)?;
 
     let vault_data = LaunchVaultState {
         user: user_key,
         token_mint: mint_key,
         total_token_amount: total_tokens_bought,
         remaining_token_amount: total_tokens_bought,
-        total_lp_allocation: lp_allocation,
-        remaining_lp_allocation: lp_allocation,
+        total_lp_allocation: actual_lp_deployed,
+        remaining_lp_allocation: actual_lp_deployed,
         user_contribution,
         status: VaultStatus::Active,
-        rental_start_timestamp: clock.unix_timestamp,
-        rental_due_timestamp: rental_due,
-        rental_status: RentalStatus::Active,
+        open_timestamp: clock.unix_timestamp,
+        fee_paid: total_fee,
+        num_sub_wallets: num_buyers as u8,
         bump: vault_bump,
     };
 
-    // Write discriminator + data to vault account
     let mut vault_account_data = ctx.accounts.vault_state.try_borrow_mut_data()?;
     let dst = &mut vault_account_data[..];
-    // Anchor discriminator for LaunchVaultState
     let discriminator = LaunchVaultState::DISCRIMINATOR;
     dst[..8].copy_from_slice(&discriminator);
     vault_data.serialize(&mut &mut dst[8..])?;
 
-    // ========================================================
-    // STEP 7: Update LP pool accounting
-    // ========================================================
-    let lp_pool = &mut ctx.accounts.lp_pool;
-    lp_pool.total_liquidity = lp_pool
-        .total_liquidity
-        .checked_sub(total_sol_spent)
-        .ok_or(LaunchVaultError::ArithmeticOverflow)?;
-    // Release user_contribution from reserved; lp_allocation stays reserved
-    lp_pool.reserved_liquidity = lp_pool
-        .reserved_liquidity
-        .checked_sub(user_contribution)
-        .ok_or(LaunchVaultError::ArithmeticOverflow)?;
-    lp_pool.available_liquidity = lp_pool
-        .total_liquidity
-        .checked_sub(lp_pool.reserved_liquidity)
-        .ok_or(LaunchVaultError::ArithmeticOverflow)?;
-
-
-    // ========================================================
-    // STEP 8: Emit event
-    // ========================================================
-    emit!(LaunchBundleEvent {
+    emit!(PositionOpenedEvent {
         vault: vault_pda,
         user: user_key,
         token_mint: mint_key,
@@ -626,9 +627,9 @@ pub fn handler<'info>(
         total_sol_spent,
         lp_allocation,
         user_contribution,
+        fee_paid: total_fee,
         timestamp: clock.unix_timestamp,
     });
 
     Ok(())
 }
-

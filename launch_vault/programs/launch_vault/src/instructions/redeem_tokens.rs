@@ -41,7 +41,7 @@ pub struct RedeemTokens<'info> {
     )]
     pub treasury: UncheckedAccount<'info>,
 
-    /// CHECK: Vault token account — verified via ATA derivation
+    /// CHECK: Vault token account
     #[account(
         mut,
         constraint = vault_token_account.key() == anchor_spl::associated_token::get_associated_token_address_with_program_id(
@@ -52,11 +52,11 @@ pub struct RedeemTokens<'info> {
     )]
     pub vault_token_account: UncheckedAccount<'info>,
 
-    /// CHECK: User token account — validated by token program CPI
+    /// CHECK: User token account
     #[account(mut)]
     pub user_token_account: UncheckedAccount<'info>,
 
-    /// CHECK: Token mint — needed for transfer_checked, verified against vault
+    /// CHECK: Token mint
     #[account(
         constraint = token_mint.key() == vault_state.token_mint @ LaunchVaultError::InvalidVaultTokenAccount,
     )]
@@ -77,7 +77,7 @@ pub fn handler(ctx: Context<RedeemTokens>, amount: u64) -> Result<()> {
         LaunchVaultError::RedeemAmountExceedsRemaining
     );
 
-    // Calculate proportional LP to return (u128 to avoid overflow)
+    // Calculate proportional LP to return
     let proportional_lp = (amount as u128)
         .checked_mul(vault.remaining_lp_allocation as u128)
         .ok_or(LaunchVaultError::ArithmeticOverflow)?
@@ -109,12 +109,9 @@ pub fn handler(ctx: Context<RedeemTokens>, amount: u64) -> Result<()> {
         vault.status = VaultStatus::Closed;
     }
 
-    // Update LP pool: new SOL arrives from user, release reservation
+    // Update LP pool: release reserved exposure (total_liquidity unchanged —
+    // reserved was already counted in total, user's SOL payment replaces the exposure)
     let lp_pool = &mut ctx.accounts.lp_pool;
-    lp_pool.total_liquidity = lp_pool
-        .total_liquidity
-        .checked_add(proportional_lp)
-        .ok_or(LaunchVaultError::ArithmeticOverflow)?;
     lp_pool.reserved_liquidity = lp_pool
         .reserved_liquidity
         .checked_sub(proportional_lp)
@@ -150,7 +147,7 @@ pub fn handler(ctx: Context<RedeemTokens>, amount: u64) -> Result<()> {
         )?;
     }
 
-    // Transfer tokens from vault to user (PDA signer, Token2022 compatible)
+    // Transfer tokens from vault to user
     let user_key = ctx.accounts.user.key();
     let mint_key = ctx.accounts.vault_state.token_mint;
     let bump = ctx.accounts.vault_state.bump;
@@ -168,7 +165,7 @@ pub fn handler(ctx: Context<RedeemTokens>, amount: u64) -> Result<()> {
         &ctx.accounts.user_token_account.key(),
         &ctx.accounts.vault_state.key(),
         amount,
-        6, // Pump.fun tokens use 6 decimals
+        6,
     );
 
     invoke_signed(

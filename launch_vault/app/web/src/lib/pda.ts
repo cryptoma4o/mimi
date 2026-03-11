@@ -25,6 +25,22 @@ export function deriveLpPool(): PublicKey {
   return pda;
 }
 
+export function deriveInsuranceFund(): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("insurance_fund")],
+    PROGRAM_ID
+  );
+  return pda;
+}
+
+export function deriveLpMint(): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("lp_mint")],
+    PROGRAM_ID
+  );
+  return pda;
+}
+
 export function deriveVaultPDA(user: PublicKey, mint: PublicKey): PublicKey {
   const [pda] = PublicKey.findProgramAddressSync(
     [Buffer.from("vault"), user.toBuffer(), mint.toBuffer()],

@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-declare_id!("2hpb3dPckVbTf81WoeYt2BybcUZQCevxi1N5DwjaRsL7");
+declare_id!("oNm4QmXFFUXYSYvDkMxW7azSihrViER4Qr1pAUnPvYg");
 
 pub mod state;
 pub mod instructions;
@@ -19,77 +19,39 @@ pub mod launch_vault {
         ctx: Context<InitializeProtocol>,
         executor: Pubkey,
         treasury: Pubkey,
-        rental_period: i64,
-        rental_fee_rate: u64,
-        infrastructure_fee: u64,
+        fixed_fee: u64,
+        fee_bps: u16,
+        max_utilization_bps: u16,
+        position_timeout: i64,
+        close_reward_bps: u16,
+        insurance_split_bps: u16,
         redemption_fee_bps: u16,
-        grace_period: i64,
     ) -> Result<()> {
         instructions::initialize_protocol::handler(
             ctx,
             executor,
             treasury,
-            rental_period,
-            rental_fee_rate,
-            infrastructure_fee,
+            fixed_fee,
+            fee_bps,
+            max_utilization_bps,
+            position_timeout,
+            close_reward_bps,
+            insurance_split_bps,
             redemption_fee_bps,
-            grace_period,
         )
-    }
-
-    pub fn deposit_lp(ctx: Context<DepositLp>, amount: u64) -> Result<()> {
-        instructions::deposit_lp::handler(ctx, amount)
-    }
-
-    pub fn withdraw_lp(ctx: Context<WithdrawLp>, amount: u64) -> Result<()> {
-        instructions::withdraw_lp::handler(ctx, amount)
-    }
-
-    pub fn create_vault(
-        ctx: Context<CreateVault>,
-        lp_allocation: u64,
-        user_contribution: u64,
-    ) -> Result<()> {
-        instructions::create_vault::handler(ctx, lp_allocation, user_contribution)
-    }
-
-    pub fn proxy_buy_token(
-        ctx: Context<ProxyBuyToken>,
-        amount: u64,
-        max_sol_cost: u64,
-    ) -> Result<()> {
-        instructions::proxy_buy_token::handler(ctx, amount, max_sol_cost)
-    }
-
-    pub fn pay_rental(ctx: Context<PayRental>) -> Result<()> {
-        instructions::pay_rental::handler(ctx)
-    }
-
-    pub fn redeem_tokens(ctx: Context<RedeemTokens>, amount: u64) -> Result<()> {
-        instructions::redeem_tokens::handler(ctx, amount)
-    }
-
-    pub fn mark_defaulted(ctx: Context<MarkDefaulted>) -> Result<()> {
-        instructions::mark_defaulted::handler(ctx)
-    }
-
-    pub fn liquidate_vault(ctx: Context<LiquidateVault>) -> Result<()> {
-        instructions::liquidate_vault::handler(ctx)
-    }
-
-    pub fn close_vault(ctx: Context<CloseVault>) -> Result<()> {
-        instructions::close_vault::handler(ctx)
     }
 
     pub fn update_protocol_config(
         ctx: Context<UpdateProtocolConfig>,
         new_executor: Option<Pubkey>,
         new_treasury: Option<Pubkey>,
-        new_rental_period: Option<i64>,
-        new_rental_fee_rate: Option<u64>,
-        new_infrastructure_fee: Option<u64>,
+        new_fixed_fee: Option<u64>,
+        new_fee_bps: Option<u16>,
+        new_max_utilization_bps: Option<u16>,
+        new_position_timeout: Option<i64>,
+        new_close_reward_bps: Option<u16>,
+        new_insurance_split_bps: Option<u16>,
         new_redemption_fee_bps: Option<u16>,
-        new_grace_period: Option<i64>,
         new_admin: Option<Pubkey>,
         new_status: Option<ProtocolStatus>,
     ) -> Result<()> {
@@ -97,14 +59,24 @@ pub mod launch_vault {
             ctx,
             new_executor,
             new_treasury,
-            new_rental_period,
-            new_rental_fee_rate,
-            new_infrastructure_fee,
+            new_fixed_fee,
+            new_fee_bps,
+            new_max_utilization_bps,
+            new_position_timeout,
+            new_close_reward_bps,
+            new_insurance_split_bps,
             new_redemption_fee_bps,
-            new_grace_period,
             new_admin,
             new_status,
         )
+    }
+
+    pub fn deposit_lp(ctx: Context<DepositLp>, amount: u64) -> Result<()> {
+        instructions::deposit_lp::handler(ctx, amount)
+    }
+
+    pub fn withdraw_lp(ctx: Context<WithdrawLp>, lp_amount: u64) -> Result<()> {
+        instructions::withdraw_lp::handler(ctx, lp_amount)
     }
 
     pub fn proxy_create_token(
@@ -117,8 +89,8 @@ pub mod launch_vault {
         instructions::proxy_create_token::handler(ctx, name, symbol, uri, is_mayhem_mode)
     }
 
-    pub fn launch_bundle<'info>(
-        ctx: Context<'_, '_, '_, 'info, LaunchBundle<'info>>,
+    pub fn open_position<'info>(
+        ctx: Context<'_, '_, '_, 'info, OpenPosition<'info>>,
         name: String,
         symbol: String,
         uri: String,
@@ -128,7 +100,7 @@ pub mod launch_vault {
         buy_amounts: Vec<u64>,
         max_sol_costs: Vec<u64>,
     ) -> Result<()> {
-        instructions::launch_bundle::handler(
+        instructions::open_position::handler(
             ctx,
             name,
             symbol,
@@ -139,5 +111,21 @@ pub mod launch_vault {
             buy_amounts,
             max_sol_costs,
         )
+    }
+
+    pub fn sell_position(ctx: Context<SellPosition>, amount: u64, min_sol_output: u64) -> Result<()> {
+        instructions::sell_position::handler(ctx, amount, min_sol_output)
+    }
+
+    pub fn redeem_tokens(ctx: Context<RedeemTokens>, amount: u64) -> Result<()> {
+        instructions::redeem_tokens::handler(ctx, amount)
+    }
+
+    pub fn close_position(ctx: Context<ClosePosition>) -> Result<()> {
+        instructions::close_position::handler(ctx)
+    }
+
+    pub fn force_close_position(ctx: Context<ForceClosePosition>) -> Result<()> {
+        instructions::force_close_position::handler(ctx)
     }
 }

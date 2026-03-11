@@ -56,6 +56,16 @@ struct BuyArgs {
     max_sol_cost: u64,
 }
 
+/// sell instruction discriminator (SHA-256 of "global:sell" first 8 bytes)
+const SELL_DISCRIMINATOR: [u8; 8] = [0x33, 0xe6, 0x85, 0xa4, 0x01, 0x7f, 0x83, 0xad];
+
+/// Arguments for sell CPI call
+#[derive(AnchorSerialize)]
+struct SellArgs {
+    amount: u64,
+    min_sol_output: u64,
+}
+
 /// Derive PumpFun global_volume_accumulator PDA
 pub fn derive_global_volume_accumulator() -> Pubkey {
     let (pda, _) = Pubkey::find_program_address(
@@ -149,6 +159,63 @@ pub fn build_buy_instruction(
         AccountMeta::new_readonly(*fee_config, false),          // 14
         AccountMeta::new_readonly(FEE_PROGRAM_ID, false),       // 15
         AccountMeta::new_readonly(*bonding_curve_v2, false),    // 16
+    ];
+
+    Instruction {
+        program_id: PUMP_FUN_PROGRAM_ID,
+        accounts,
+        data,
+    }
+}
+
+/// Build Pump.fun v2 sell instruction for CPI.
+/// NOTE: Sell account layout differs from buy:
+///   - creator_vault at index 8 (before token_program)
+///   - NO volume accumulators (those are buy-only)
+///   - 15 accounts total (vs 17 for buy)
+pub fn build_sell_instruction(
+    global: &Pubkey,
+    fee_recipient: &Pubkey,
+    mint: &Pubkey,
+    bonding_curve: &Pubkey,
+    associated_bonding_curve: &Pubkey,
+    associated_user: &Pubkey,
+    user: &Pubkey,
+    system_program: &Pubkey,
+    creator_vault: &Pubkey,
+    token_program: &Pubkey,
+    event_authority: &Pubkey,
+    fee_config: &Pubkey,
+    bonding_curve_v2: &Pubkey,
+    // Args
+    amount: u64,
+    min_sol_output: u64,
+) -> Instruction {
+    let args = SellArgs {
+        amount,
+        min_sol_output,
+    };
+
+    let mut data = Vec::with_capacity(24);
+    data.extend_from_slice(&SELL_DISCRIMINATOR);
+    args.serialize(&mut data).unwrap();
+
+    let accounts = vec![
+        AccountMeta::new_readonly(*global, false),              // 0
+        AccountMeta::new(*fee_recipient, false),                // 1
+        AccountMeta::new_readonly(*mint, false),                // 2
+        AccountMeta::new(*bonding_curve, false),                // 3
+        AccountMeta::new(*associated_bonding_curve, false),     // 4
+        AccountMeta::new(*associated_user, false),              // 5
+        AccountMeta::new(*user, true),                          // 6
+        AccountMeta::new_readonly(*system_program, false),      // 7
+        AccountMeta::new(*creator_vault, false),                // 8
+        AccountMeta::new_readonly(*token_program, false),       // 9
+        AccountMeta::new_readonly(*event_authority, false),     // 10
+        AccountMeta::new_readonly(PUMP_FUN_PROGRAM_ID, false),  // 11
+        AccountMeta::new_readonly(*fee_config, false),          // 12
+        AccountMeta::new_readonly(FEE_PROGRAM_ID, false),       // 13
+        AccountMeta::new_readonly(*bonding_curve_v2, false),    // 14
     ];
 
     Instruction {

@@ -23,11 +23,13 @@ pub fn handler(
     ctx: Context<UpdateProtocolConfig>,
     new_executor: Option<Pubkey>,
     new_treasury: Option<Pubkey>,
-    new_rental_period: Option<i64>,
-    new_rental_fee_rate: Option<u64>,
-    new_infrastructure_fee: Option<u64>,
+    new_fixed_fee: Option<u64>,
+    new_fee_bps: Option<u16>,
+    new_max_utilization_bps: Option<u16>,
+    new_position_timeout: Option<i64>,
+    new_close_reward_bps: Option<u16>,
+    new_insurance_split_bps: Option<u16>,
     new_redemption_fee_bps: Option<u16>,
-    new_grace_period: Option<i64>,
     new_admin: Option<Pubkey>,
     new_status: Option<ProtocolStatus>,
 ) -> Result<()> {
@@ -39,26 +41,32 @@ pub fn handler(
     if let Some(treasury) = new_treasury {
         config.treasury = treasury;
     }
-    if let Some(rental_period) = new_rental_period {
-        require!(rental_period > 0, LaunchVaultError::InvalidRentalPeriod);
-        config.rental_period = rental_period;
+    if let Some(fixed_fee) = new_fixed_fee {
+        config.fixed_fee = fixed_fee;
     }
-    if let Some(rental_fee_rate) = new_rental_fee_rate {
-        config.rental_fee_rate = rental_fee_rate;
+    if let Some(fee_bps) = new_fee_bps {
+        require!(fee_bps <= 10_000, LaunchVaultError::InvalidFeeBps);
+        config.fee_bps = fee_bps;
     }
-    if let Some(infrastructure_fee) = new_infrastructure_fee {
-        config.infrastructure_fee = infrastructure_fee;
+    if let Some(max_utilization_bps) = new_max_utilization_bps {
+        require!(max_utilization_bps > 0 && max_utilization_bps <= 10_000, LaunchVaultError::InvalidUtilizationBps);
+        config.max_utilization_bps = max_utilization_bps;
+    }
+    if let Some(position_timeout) = new_position_timeout {
+        require!(position_timeout > 0, LaunchVaultError::InvalidPositionTimeout);
+        config.position_timeout = position_timeout;
+    }
+    if let Some(close_reward_bps) = new_close_reward_bps {
+        require!(close_reward_bps <= 10_000, LaunchVaultError::InvalidFeeBps);
+        config.close_reward_bps = close_reward_bps;
+    }
+    if let Some(insurance_split_bps) = new_insurance_split_bps {
+        require!(insurance_split_bps <= 10_000, LaunchVaultError::InvalidFeeBps);
+        config.insurance_split_bps = insurance_split_bps;
     }
     if let Some(redemption_fee_bps) = new_redemption_fee_bps {
-        require!(
-            redemption_fee_bps <= 10_000,
-            LaunchVaultError::InvalidRedemptionFeeBps
-        );
+        require!(redemption_fee_bps <= 10_000, LaunchVaultError::InvalidRedemptionFeeBps);
         config.redemption_fee_bps = redemption_fee_bps;
-    }
-    if let Some(grace_period) = new_grace_period {
-        require!(grace_period >= 0, LaunchVaultError::InvalidGracePeriod);
-        config.grace_period = grace_period;
     }
     if let Some(admin) = new_admin {
         config.admin = admin;

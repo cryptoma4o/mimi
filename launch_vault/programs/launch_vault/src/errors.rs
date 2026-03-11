@@ -32,17 +32,8 @@ pub enum LaunchVaultError {
     #[msg("Token amount must be greater than zero")]
     ZeroTokenAmount,
 
-    #[msg("Grace period has not expired yet, cannot mark as defaulted")]
-    GracePeriodNotExpired,
-
     #[msg("Redemption fee BPS must be <= 10000")]
     InvalidRedemptionFeeBps,
-
-    #[msg("Rental period must be positive")]
-    InvalidRentalPeriod,
-
-    #[msg("Grace period must be non-negative")]
-    InvalidGracePeriod,
 
     #[msg("Invalid treasury account")]
     InvalidTreasury,
@@ -79,4 +70,34 @@ pub enum LaunchVaultError {
 
     #[msg("Invalid vault token account")]
     InvalidVaultTokenAccount,
+
+    #[msg("Pool utilization cap would be exceeded")]
+    UtilizationCapReached,
+
+    #[msg("Position has not timed out yet")]
+    PositionNotTimedOut,
+
+    #[msg("Invalid fee BPS value")]
+    InvalidFeeBps,
+
+    #[msg("Invalid utilization BPS value")]
+    InvalidUtilizationBps,
+
+    #[msg("Position timeout must be positive")]
+    InvalidPositionTimeout,
+
+    #[msg("Deposit amount must be greater than zero")]
+    ZeroDepositAmount,
+
+    #[msg("Withdraw amount must be greater than zero")]
+    ZeroWithdrawAmount,
+
+    #[msg("Invalid LP token amount")]
+    InvalidLpTokenAmount,
+
+    #[msg("Only vault owner or executor can sell position")]
+    UnauthorizedSeller,
+
+    #[msg("Minimum SOL output not met")]
+    SlippageExceeded,
 }

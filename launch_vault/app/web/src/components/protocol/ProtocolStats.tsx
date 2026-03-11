@@ -66,7 +66,7 @@ export function ProtocolStats() {
   const cfg = config!.data;
   const lp = pool!.data;
 
-  const totalLiq = (cfg as any).rentalPeriod ? Number((lp as any).totalLiquidity) : 0;
+  const totalLiq = Number((lp as any).totalLiquidity);
   const reservedLiq = Number((lp as any).reservedLiquidity);
   const availableLiq = Number((lp as any).availableLiquidity);
   const utilizationPct = totalLiq > 0 ? ((reservedLiq / totalLiq) * 100).toFixed(1) : "0";
@@ -90,11 +90,13 @@ export function ProtocolStats() {
         <CopyableAddress label="Admin" address={(cfg as any).admin.toBase58()} />
         <CopyableAddress label="Executor" address={(cfg as any).executor.toBase58()} />
         <CopyableAddress label="Treasury" address={(cfg as any).treasury.toBase58()} />
-        <StatRow label="Rental Period" value={formatDuration(Number((cfg as any).rentalPeriod))} />
-        <StatRow label="Rental Fee" value={`${formatSol(Number((cfg as any).rentalFeeRate))} SOL`} />
-        <StatRow label="Infrastructure Fee" value={`${formatSol(Number((cfg as any).infrastructureFee))} SOL`} />
+        <StatRow label="Fixed Fee" value={`${formatSol(Number((cfg as any).fixedFee))} SOL`} />
+        <StatRow label="Fee BPS" value={formatBps((cfg as any).feeBps)} />
+        <StatRow label="Max Utilization" value={formatBps((cfg as any).maxUtilizationBps)} />
+        <StatRow label="Position Timeout" value={formatDuration(Number((cfg as any).positionTimeout))} />
+        <StatRow label="Close Reward" value={formatBps((cfg as any).closeRewardBps)} />
+        <StatRow label="Insurance Split" value={formatBps((cfg as any).insuranceSplitBps)} />
         <StatRow label="Redemption Fee" value={formatBps((cfg as any).redemptionFeeBps)} />
-        <StatRow label="Grace Period" value={formatDuration(Number((cfg as any).gracePeriod))} />
       </div>
 
       {/* LP Pool */}
