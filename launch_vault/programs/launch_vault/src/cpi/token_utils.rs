@@ -1,6 +1,12 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
 
+/// Token2022 program ID — used for ATA derivation of Pump.fun v2 tokens.
+/// Pump.fun sell CPI expects the legacy SPL Token program in the `token_program`
+/// account position, but ATAs are created under Token2022, so we cannot rely on
+/// `token_program.key()` when deriving the ATA address.
+pub const TOKEN_2022_PROGRAM_ID: Pubkey = pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
 /// Safely read the token amount from a Token/Token2022 account.
 /// The `amount` field is at byte offset 64 in the SPL Token Account layout:
 /// mint[32] + owner[32] + amount[8] = offset 64.

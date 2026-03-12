@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
 
 use crate::cpi::pump_fun;
-use crate::cpi::token_utils::read_token_account_amount;
+use crate::cpi::token_utils::{read_token_account_amount, TOKEN_2022_PROGRAM_ID};
 use crate::errors::LaunchVaultError;
 use crate::events::PositionSoldEvent;
 use crate::state::*;
@@ -46,7 +46,7 @@ pub struct SellPosition<'info> {
             &vault_state.token_mint,
             // Hardcode Token2022 for ATA derivation — Pump.fun v2 tokens are Token2022,
             // but Pump.fun sell CPI expects old SPL Token program in token_program position.
-            &pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"),
+            &TOKEN_2022_PROGRAM_ID,
         ) @ LaunchVaultError::InvalidVaultTokenAccount,
     )]
     pub vault_token_account: UncheckedAccount<'info>,

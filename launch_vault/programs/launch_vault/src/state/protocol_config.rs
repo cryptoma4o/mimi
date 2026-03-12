@@ -20,7 +20,7 @@ pub struct ProtocolConfig {
     pub max_utilization_bps: u16,
     /// Position timeout in seconds (after which permissionless close is allowed)
     pub position_timeout: i64,
-    /// Reward for permissionless closer (basis points of returned LP)
+    /// Reward for permissionless closer (basis points of remaining LP allocation)
     pub close_reward_bps: u16,
     /// Percentage of fees routed to insurance fund (basis points, 2000 = 20%)
     pub insurance_split_bps: u16,

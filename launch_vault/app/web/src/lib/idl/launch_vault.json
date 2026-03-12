@@ -1,5 +1,5 @@
 {
-  "address": "2hpb3dPckVbTf81WoeYt2BybcUZQCevxi1N5DwjaRsL7",
+  "address": "oNm4QmXFFUXYSYvDkMxW7azSihrViER4Qr1pAUnPvYg",
   "metadata": {
     "name": "launch_vault",
     "version": "0.1.0",
@@ -312,13 +312,6 @@
           "writable": true
         },
         {
-          "name": "pump_global_volume_accumulator"
-        },
-        {
-          "name": "pump_vault_volume_accumulator",
-          "writable": true
-        },
-        {
           "name": "pump_fee_config"
         },
         {
@@ -506,10 +499,6 @@
         {
           "name": "mint",
           "writable": true,
-          "signer": true
-        },
-        {
-          "name": "executor",
           "signer": true
         },
         {
@@ -1061,13 +1050,6 @@
         },
         {
           "name": "pump_creator_vault",
-          "writable": true
-        },
-        {
-          "name": "pump_global_volume_accumulator"
-        },
-        {
-          "name": "pump_vault_volume_accumulator",
           "writable": true
         },
         {

@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/launch_vault.json`.
  */
 export type LaunchVault = {
-  "address": "2hpb3dPckVbTf81WoeYt2BybcUZQCevxi1N5DwjaRsL7",
+  "address": "oNm4QmXFFUXYSYvDkMxW7azSihrViER4Qr1pAUnPvYg",
   "metadata": {
     "name": "launchVault",
     "version": "0.1.0",
@@ -318,13 +318,6 @@ export type LaunchVault = {
           "writable": true
         },
         {
-          "name": "pumpGlobalVolumeAccumulator"
-        },
-        {
-          "name": "pumpVaultVolumeAccumulator",
-          "writable": true
-        },
-        {
           "name": "pumpFeeConfig"
         },
         {
@@ -512,10 +505,6 @@ export type LaunchVault = {
         {
           "name": "mint",
           "writable": true,
-          "signer": true
-        },
-        {
-          "name": "executor",
           "signer": true
         },
         {
@@ -1067,13 +1056,6 @@ export type LaunchVault = {
         },
         {
           "name": "pumpCreatorVault",
-          "writable": true
-        },
-        {
-          "name": "pumpGlobalVolumeAccumulator"
-        },
-        {
-          "name": "pumpVaultVolumeAccumulator",
           "writable": true
         },
         {

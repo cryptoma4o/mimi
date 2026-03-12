@@ -11,7 +11,7 @@ use crate::cpi::token_utils::{
     build_transfer_checked_instruction,
 };
 use crate::errors::LaunchVaultError;
-use crate::events::PositionOpenedEvent;
+use crate::events::{InsuranceFundUpdatedEvent, PositionOpenedEvent};
 use crate::state::*;
 
 const MAX_BUYERS: usize = pump_fun::MAX_BUYERS;
@@ -24,11 +24,6 @@ pub struct OpenPosition<'info> {
 
     #[account(mut)]
     pub mint: Signer<'info>,
-
-    #[account(
-        constraint = executor.key() == protocol_config.executor @ LaunchVaultError::UnauthorizedExecutor,
-    )]
-    pub executor: Signer<'info>,
 
     // === Protocol state ===
     /// CHECK: vault_state PDA — initialized manually in handler
@@ -56,13 +51,12 @@ pub struct OpenPosition<'info> {
     )]
     pub treasury: UncheckedAccount<'info>,
 
-    /// CHECK: Insurance fund PDA
     #[account(
         mut,
         seeds = [b"insurance_fund"],
-        bump,
+        bump = insurance_fund.bump,
     )]
-    pub insurance_fund: UncheckedAccount<'info>,
+    pub insurance_fund: Account<'info, InsuranceFund>,
 
     // === Pump.fun accounts ===
     /// CHECK: Pump.fun program ID
@@ -240,6 +234,8 @@ pub fn handler<'info>(
         )?;
     }
 
+    let clock = Clock::get()?;
+
     // Fee → insurance fund
     if insurance_amount > 0 {
         system_program::transfer(
@@ -252,6 +248,20 @@ pub fn handler<'info>(
             ),
             insurance_amount,
         )?;
+
+        // Update insurance fund accounting
+        ctx.accounts.insurance_fund.total_sol = ctx
+            .accounts
+            .insurance_fund
+            .total_sol
+            .checked_add(insurance_amount)
+            .ok_or(LaunchVaultError::ArithmeticOverflow)?;
+
+        emit!(InsuranceFundUpdatedEvent {
+            new_total: ctx.accounts.insurance_fund.total_sol,
+            amount_added: insurance_amount,
+            timestamp: clock.unix_timestamp,
+        });
     }
 
     // ========================================================
@@ -595,8 +605,6 @@ pub fn handler<'info>(
     // ========================================================
     // STEP 7: Write vault state
     // ========================================================
-    let clock = Clock::get()?;
-
     let vault_data = LaunchVaultState {
         user: user_key,
         token_mint: mint_key,

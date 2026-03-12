@@ -1,4 +1,15 @@
-import { PublicKey, Keypair, SystemProgram, SYSVAR_RENT_PUBKEY, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import {
+  PublicKey,
+  Keypair,
+  SystemProgram,
+  SYSVAR_RENT_PUBKEY,
+  LAMPORTS_PER_SOL,
+  TransactionMessage,
+  VersionedTransaction,
+  Connection,
+  AddressLookupTableAccount,
+  ComputeBudgetProgram,
+} from "@solana/web3.js";
 import {
   getAssociatedTokenAddressSync,
   createAssociatedTokenAccountIdempotentInstruction,
@@ -27,6 +38,7 @@ import {
   deriveMayhemPDAs,
   deriveBuyerPDA,
 } from "./pda";
+import { fetchALT } from "./alt";
 
 // ── proxyCreateToken ────────────────────────────────────────────────────
 
@@ -70,7 +82,7 @@ export async function buildProxyCreateToken(
 
 export async function buildOpenPosition(
   program: Program<LaunchVault>,
-  connection: { getAccountInfo: (pubkey: PublicKey) => Promise<any> },
+  connection: Connection,
   user: PublicKey,
   args: {
     name: string;
@@ -81,6 +93,7 @@ export async function buildOpenPosition(
     userContributionSol: number;
     buyAmounts: BN[];
     maxSolCosts: BN[];
+    altAddress?: PublicKey;
   }
 ) {
   if (args.buyAmounts.length !== args.maxSolCosts.length) {
@@ -128,7 +141,8 @@ export async function buildOpenPosition(
     remainingAccounts.push({ pubkey: buyerVol, isSigner: false, isWritable: true });
   }
 
-  const tx = await program.methods
+  // Build instruction (not .rpc()) so we can wrap in VersionedTransaction
+  const ix = await program.methods
     .openPosition(
       args.name,
       args.symbol,
@@ -142,7 +156,6 @@ export async function buildOpenPosition(
     .accounts({
       user,
       mint,
-      executor: user,
       vaultState: vaultPDA,
       protocolConfig,
       lpPool,
@@ -171,10 +184,28 @@ export async function buildOpenPosition(
       rent: SYSVAR_RENT_PUBKEY,
     } as any)
     .remainingAccounts(remainingAccounts)
-    .signers([mintKeypair])
-    .rpc();
+    .instruction();
 
-  return { tx, mint, vaultPDA };
+  // Build VersionedTransaction with ALT for compression
+  const computeIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 });
+
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+  const lookupTables: AddressLookupTableAccount[] = [];
+  if (args.altAddress) {
+    const alt = await fetchALT(connection, args.altAddress);
+    lookupTables.push(alt);
+  }
+
+  const message = new TransactionMessage({
+    payerKey: user,
+    recentBlockhash: blockhash,
+    instructions: [computeIx, ix],
+  }).compileToV0Message(lookupTables);
+
+  const vtx = new VersionedTransaction(message);
+  vtx.sign([mintKeypair]);
+
+  return { vtx, mint, vaultPDA, mintKeypair, blockhash, lastValidBlockHeight };
 }
 
 // ── sellPosition ────────────────────────────────────────────────────────

@@ -951,7 +951,6 @@ async function cmdLaunchBundle(flags: Record<string, string | boolean>, keypairP
     .accounts({
       user: walletKeypair.publicKey,
       mint,
-      executor: walletKeypair.publicKey,
       vaultState: vaultPDA,
       protocolConfig,
       lpPool,

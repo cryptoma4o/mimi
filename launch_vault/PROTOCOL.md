@@ -2,7 +2,7 @@
 
 Solana-программа (Anchor 0.32.1) — протокол ликвидности для запуска токенов на Pump.fun v2.
 
-**Program ID:** `2hpb3dPckVbTf81WoeYt2BybcUZQCevxi1N5DwjaRsL7`
+**Program ID:** `oNm4QmXFFUXYSYvDkMxW7azSihrViER4Qr1pAUnPvYg`
 
 ---
 
@@ -14,20 +14,18 @@ Solana-программа (Anchor 0.32.1) — протокол ликвидно�
 - [State (PDA-аккаунты)](#state-pda-аккаунты)
 - [PDA-адреса](#pda-адреса)
 - [Fees (комиссии)](#fees-комиссии)
+- [LP Pool Accounting](#lp-pool-accounting)
 - [Инструкции](#инструкции)
   - [initialize_protocol](#1-initialize_protocol)
   - [update_protocol_config](#2-update_protocol_config)
   - [deposit_lp](#3-deposit_lp)
   - [withdraw_lp](#4-withdraw_lp)
   - [proxy_create_token](#5-proxy_create_token)
-  - [create_vault](#6-create_vault)
-  - [proxy_buy_token](#7-proxy_buy_token)
-  - [pay_rental](#8-pay_rental)
-  - [redeem_tokens](#9-redeem_tokens)
-  - [mark_defaulted](#10-mark_defaulted)
-  - [liquidate_vault](#11-liquidate_vault)
-  - [close_vault](#12-close_vault)
-  - [launch_bundle](#13-launch_bundle)
+  - [open_position](#6-open_position)
+  - [sell_position](#7-sell_position)
+  - [redeem_tokens](#8-redeem_tokens)
+  - [close_position](#9-close_position)
+  - [force_close_position](#10-force_close_position)
 - [CPI к Pump.fun v2](#cpi-к-pumpfun-v2)
 - [CPI Token2022 (token_utils)](#cpi-token2022-token_utils)
 - [SOL Flow](#sol-flow)
@@ -43,60 +41,63 @@ Solana-программа (Anchor 0.32.1) — протокол ликвидно�
 
 LaunchVault предоставляет **заёмную ликвидность** для запуска токенов на Pump.fun v2. Протокол решает проблему: у создателя токена нет достаточно SOL для покупки своего токена на bonding curve.
 
+### Модель: Upfront Fee
+
+Протокол использует модель **однократной предоплаты (upfront fee)** вместо аренды. Пользователь платит фиксированный + процентный сбор при открытии позиции, после чего долг перед LP пулом фиксируется и погашается через продажу токенов (`sell_position`) или возврат токенов (`redeem_tokens`).
+
 ### Как это работает
 
-1. LP-провайдеры наполняют пул SOL
-2. Пользователь создаёт токен на Pump.fun через CPI
-3. Протокол выделяет SOL из LP пула + user contribution для покупки токенов
-4. Купленные токены блокируются в vault PDA
-5. Пользователь платит **аренду** за использование ликвидности каждый период
-6. Для выкупа токенов пользователь возвращает пропорциональную часть LP + redemption fee
-7. При неоплате аренды — vault переходит в дефолт, токены ликвидируются
+1. **LP-провайдеры** наполняют пул SOL, получая mimi-LP токены (Token2022)
+2. Пользователь вызывает `open_position`: создаёт токен на Pump.fun, платит upfront fee, протокол выделяет SOL из LP пула + user contribution для покупки токенов через PDA sub-wallets
+3. Купленные токены консолидируются на vault ATA (принадлежащем vault PDA)
+4. Пользователь продаёт токены (`sell_position`) — SOL возвращается в LP пул пропорционально
+5. Или пользователь забирает токены (`redeem_tokens`) — платит SOL пулу + redemption fee
+6. Позиция закрывается (`close_position`) — аккаунт утилизируется, rent возвращается
 
-### Два сценария запуска
+### Ключевые особенности
 
-**Пошаговый:**
-```
-proxy_create_token → create_vault → proxy_buy_token → pay_rental → redeem_tokens → close_vault
-```
-
-**Атомарный (launch_bundle):**
-```
-launch_bundle (create + vault + 5 buy с разных PDA) → pay_rental → redeem_tokens → close_vault
-```
+- **До 5 buyer PDA** для бандл-покупок (имитация нескольких кошельков)
+- **Upfront fee** = fixed_fee + percentage от LP allocation
+- **Insurance fund** — часть комиссий уходит в страховой фонд
+- **Permissionless close** — после timeout любой может закрыть позицию за награду
+- **Force close** — executor может экстренно продать все токены
+- **Utilization cap** — ограничение % использования LP пула
 
 ---
 
 ## Архитектура
 
-- **Фреймворк:** Anchor 0.32.1
-- **Сеть:** Solana
-- **Токен-стандарт:** Token2022 (используется Pump.fun v2)
-- **Внешние программы:**
-  - Pump.fun v2: `6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P`
-  - Mayhem: `MAyhSmzXzV1pTf7LsNkrNwkWKTo4ougAJ1PPg47MD4e`
-  - SPL Token2022
-  - SPL Associated Token Account
-  - System Program
-
-### Зависимости (Cargo.toml)
-
-```toml
-anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
-anchor-spl = { version = "0.32.1", features = ["token", "associated_token"] }
+```
+┌──────────────────────────────────────────────────┐
+│                  LaunchVault Program               │
+│              oNm4QmXFFUXYSYvDkMxW7azS...          │
+│                                                    │
+│  ┌────────────┐  ┌────────┐  ┌───────────────┐    │
+│  │ProtocolConfig│ │ LpPool │  │InsuranceFund  │    │
+│  └────────────┘  └────────┘  └───────────────┘    │
+│                                                    │
+│  ┌──────────────────────────────────┐              │
+│  │ LaunchVaultState (per user+mint) │              │
+│  │   vault ATA ◄── buyer PDAs      │              │
+│  └──────────────────────────────────┘              │
+│                                                    │
+│  CPI ──► Pump.fun v2 (create_v2, buy, sell)        │
+│  CPI ──► Token2022 (mint, burn, transfer)          │
+│  CPI ──► Mayhem (через create_v2)                  │
+└──────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Роли
 
-| Роль | Описание | Инструкции |
-|------|----------|------------|
-| **Admin** | Управляет протоколом. Устанавливается при `initialize_protocol`. Может передать другому через `update_protocol_config`. | `initialize_protocol`, `update_protocol_config` |
-| **Executor** | Авторизованный оператор. Выполняет покупки токенов и ликвидации. Устанавливается admin'ом в `protocol_config.executor`. | `proxy_buy_token`, `liquidate_vault`, `launch_bundle` (co-signer) |
-| **User** | Создатель токена и владелец vault. Платит fees и аренду. | `proxy_create_token`, `create_vault`, `pay_rental`, `redeem_tokens`, `close_vault`, `launch_bundle` |
-| **LP Authority** | Поставщик ликвидности. По умолчанию = Admin (устанавливается как `lp_pool.authority` при init). | `deposit_lp`, `withdraw_lp` |
-| **Cranker** | Permissionless — любой аккаунт. Помечает просроченные vault'ы. | `mark_defaulted` |
+| Роль | Описание | Доступные инструкции |
+|------|----------|---------------------|
+| **Admin** | Создатель протокола, управляет конфигурацией | `initialize_protocol`, `update_protocol_config` |
+| **Executor** | Доверенный оператор для исполнения buy CPI и экстренных закрытий | `open_position` (подписывает buy CPI), `sell_position` (как keeper), `force_close_position` |
+| **User** | Создатель позиции, владелец vault | `open_position`, `sell_position` (свой vault), `redeem_tokens`, `close_position` (свой vault) |
+| **LP Provider** | Поставщик ликвидности | `deposit_lp`, `withdraw_lp` |
+| **Anyone** | Любой пользователь | `close_position` (после timeout — permissionless close) |
 
 ---
 
@@ -104,83 +105,69 @@ anchor-spl = { version = "0.32.1", features = ["token", "associated_token"] }
 
 ### ProtocolConfig
 
-Глобальная конфигурация протокола. Один на всю программу.
+Seed: `[b"protocol_config"]`
 
-```rust
-#[account]
-pub struct ProtocolConfig {
-    pub admin: Pubkey,              // Администратор протокола
-    pub executor: Pubkey,           // Авторизованный оператор
-    pub treasury: Pubkey,           // Получатель комиссий
-    pub rental_period: i64,         // Период аренды в секундах (напр. 86400 = 24ч)
-    pub rental_fee_rate: u64,       // Стоимость аренды за период (lamports)
-    pub infrastructure_fee: u64,    // Разовая комиссия при создании vault (lamports)
-    pub redemption_fee_bps: u16,    // Комиссия при выкупе токенов (BPS, 10000 = 100%)
-    pub grace_period: i64,          // Допустимая просрочка до дефолта (секунды)
-    pub status: ProtocolStatus,     // Active / Paused
-    pub bump: u8,                   // PDA bump
-}
-```
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `admin` | `Pubkey` | Адрес администратора |
+| `executor` | `Pubkey` | Адрес executor'а (подписывает buy CPI, force close) |
+| `treasury` | `Pubkey` | Адрес казначейства (получает комиссии) |
+| `fixed_fee` | `u64` | Фиксированная комиссия за открытие позиции (lamports) |
+| `fee_bps` | `u16` | Процентная комиссия на LP allocation (basis points, 200 = 2%) |
+| `max_utilization_bps` | `u16` | Максимальная утилизация LP пула (basis points, 8500 = 85%) |
+| `position_timeout` | `i64` | Таймаут позиции в секундах (после которого разрешён permissionless close) |
+| `close_reward_bps` | `u16` | Награда за permissionless close (basis points от remaining LP) |
+| `insurance_split_bps` | `u16` | Доля комиссий в страховой фонд (basis points, 2000 = 20%) |
+| `redemption_fee_bps` | `u16` | Комиссия при redeem (basis points, 10000 = 100%) |
+| `status` | `ProtocolStatus` | Статус протокола: `Active` / `Paused` |
+| `bump` | `u8` | PDA bump |
 
 ### LpPool
 
-Пул ликвидности. Хранит SOL. Один на всю программу.
+Seed: `[b"lp_pool"]`
 
-```rust
-#[account]
-pub struct LpPool {
-    pub total_liquidity: u64,       // Весь SOL в пуле (lamports)
-    pub reserved_liquidity: u64,    // Зарезервирован под активные vault'ы (lamports)
-    pub available_liquidity: u64,   // Доступен для новых vault'ов: total - reserved (lamports)
-    pub authority: Pubkey,          // Кто может deposit/withdraw
-    pub bump: u8,                   // PDA bump
-}
-```
-
-**Инвариант:** `total_liquidity = reserved_liquidity + available_liquidity`
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `total_liquidity` | `u64` | Общий SOL в пуле (lamports) — физический + зарезервированный |
+| `reserved_liquidity` | `u64` | SOL зарезервированный для активных позиций (lamports) |
+| `available_liquidity` | `u64` | SOL доступный для новых позиций и вывода (total - reserved) |
+| `lp_mint` | `Pubkey` | Адрес LP токен минта (mimi-LP, Token2022) |
+| `lp_mint_supply` | `u64` | Кэшированный supply LP токенов |
+| `total_defaults` | `u32` | Общее число дефолтов (для аналитики / circuit breaker) |
+| `total_positions_closed` | `u32` | Общее число закрытых позиций |
+| `authority` | `Pubkey` | Authority пула (admin) |
+| `bump` | `u8` | PDA bump |
 
 ### LaunchVaultState
 
-Состояние одного vault'а. Создаётся при `create_vault` или `launch_bundle`.
+Seed: `[b"vault", user.key(), mint.key()]`
 
-```rust
-#[account]
-pub struct LaunchVaultState {
-    pub user: Pubkey,                    // Владелец vault
-    pub token_mint: Pubkey,              // Адрес минта токена
-    pub total_token_amount: u64,         // Всего куплено токенов
-    pub remaining_token_amount: u64,     // Осталось токенов в vault
-    pub total_lp_allocation: u64,        // Общая LP ликвидность задействована (lamports)
-    pub remaining_lp_allocation: u64,    // LP ликвидность к возврату (lamports)
-    pub user_contribution: u64,          // Вклад пользователя (lamports)
-    pub status: VaultStatus,             // ReadyForExecution / Active / Closed / Defaulted
-    pub rental_start_timestamp: i64,     // Unix timestamp начала аренды
-    pub rental_due_timestamp: i64,       // Дедлайн текущего периода аренды
-    pub rental_status: RentalStatus,     // Active / Overdue
-    pub bump: u8,                        // PDA bump
-}
-```
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `user` | `Pubkey` | Владелец vault |
+| `token_mint` | `Pubkey` | Адрес токена (mint) |
+| `total_token_amount` | `u64` | Всего токенов куплено при open |
+| `remaining_token_amount` | `u64` | Оставшиеся токены в vault |
+| `total_lp_allocation` | `u64` | Общий LP allocation из пула (lamports) |
+| `remaining_lp_allocation` | `u64` | Оставшийся LP долг (lamports) |
+| `user_contribution` | `u64` | Собственный вклад пользователя (lamports) |
+| `status` | `VaultStatus` | Статус: `Active` / `Closed` / `TimedOut` |
+| `open_timestamp` | `i64` | Unix timestamp открытия позиции |
+| `fee_paid` | `u64` | Уплаченная upfront fee (lamports) |
+| `num_sub_wallets` | `u8` | Количество buyer PDA, использованных при покупке |
+| `bump` | `u8` | PDA bump |
 
-### Enum'ы
+### InsuranceFund
 
-```rust
-pub enum ProtocolStatus {
-    Active,     // Протокол работает
-    Paused,     // Протокол на паузе — новые vault'ы нельзя создавать
-}
+Seed: `[b"insurance_fund"]`
 
-pub enum VaultStatus {
-    ReadyForExecution,  // Vault создан, ожидает покупки токенов (proxy_buy_token)
-    Active,             // Токены куплены, аренда активна
-    Closed,             // Все токены выкуплены или vault закрыт
-    Defaulted,          // Просрочка аренды, vault помечен как дефолтный
-}
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `total_sol` | `u64` | Общий SOL в страховом фонде (lamports) |
+| `authority` | `Pubkey` | Authority (admin) |
+| `bump` | `u8` | PDA bump |
 
-pub enum RentalStatus {
-    Active,     // Аренда оплачена вовремя
-    Overdue,    // Аренда просрочена
-}
-```
+> **Примечание:** InsuranceFund аккумулирует SOL на lamports самого PDA-аккаунта. Поле `total_sol` является справочным счётчиком.
 
 ---
 
@@ -188,58 +175,87 @@ pub enum RentalStatus {
 
 | PDA | Seeds | Описание |
 |-----|-------|----------|
-| `protocol_config` | `[b"protocol_config"]` | Глобальная конфигурация |
-| `lp_pool` | `[b"lp_pool"]` | Пул ликвидности |
-| `vault_state` | `[b"vault", user.key(), mint.key()]` | Состояние vault (уникально для user + mint) |
-| `buyer_pda` | `[b"buyer", vault.key(), &[index]]` | PDA-кошелёк покупателя в launch_bundle (index: 0..4) |
+| `protocol_config` | `[b"protocol_config"]` | Глобальная конфигурация протокола |
+| `lp_pool` | `[b"lp_pool"]` | LP пул (хранит SOL как lamports на аккаунте) |
+| `lp_mint` | `[b"lp_mint"]` | Минт LP токенов (Token2022, 9 decimals), mint authority = сам PDA |
+| `insurance_fund` | `[b"insurance_fund"]` | Страховой фонд (SOL на PDA) |
+| `vault` | `[b"vault", user, mint]` | Состояние vault позиции |
+| `buyer` | `[b"buyer", vault_pda, &[index]]` | Временные buyer PDA для покупки (index: 0..4) |
 
 ---
 
 ## Fees (комиссии)
 
-Все fees получает **treasury** (кроме redemption, где часть идёт в LP pool).
-
-### 1. Infrastructure Fee
-
-- **Когда:** при создании vault (`create_vault`, `launch_bundle`)
-- **Размер:** `protocol_config.infrastructure_fee` (lamports, фиксированная сумма)
-- **Кто платит:** User
-- **Куда:** Treasury
-- **Разовая**
-
-### 2. Rental Fee
-
-- **Когда:** первый раз при создании vault, затем каждый период через `pay_rental`
-- **Размер:** `protocol_config.rental_fee_rate` (lamports за период)
-- **Кто платит:** User
-- **Куда:** Treasury
-- **Периодическая** (каждые `rental_period` секунд)
-
-### 3. Redemption Fee
-
-- **Когда:** при выкупе токенов (`redeem_tokens`)
-- **Размер:** `protocol_config.redemption_fee_bps` (BPS от возвращаемого LP; 100 BPS = 1%)
-- **Формула:** `redemption_fee = proportional_lp * redemption_fee_bps / 10000`
-- **Кто платит:** User
-- **Куда:** Treasury
-
-### Пример расчёта
+### При открытии позиции (open_position)
 
 ```
-infrastructure_fee = 0.01 SOL
-rental_fee_rate = 0.005 SOL/период
-rental_period = 86400 (24 часа)
-redemption_fee_bps = 200 (2%)
-
-При создании vault:
-  User платит: 0.01 (infra) + 0.005 (первый rental) = 0.015 SOL → Treasury
-
-При выкупе 50% токенов (LP allocation = 10 SOL):
-  proportional_lp = 5 SOL
-  redemption_fee = 5 * 200 / 10000 = 0.1 SOL → Treasury
-  User платит: 5 SOL → LP Pool + 0.1 SOL → Treasury
-  User получает: 50% токенов из vault
+percentage_fee = lp_allocation * fee_bps / 10_000
+total_fee      = fixed_fee + percentage_fee
+insurance_amount = total_fee * insurance_split_bps / 10_000  → insurance_fund PDA
+treasury_amount  = total_fee - insurance_amount               → treasury
 ```
+
+Пользователь платит `total_fee` из своего кошелька при вызове `open_position`. Комиссия разделяется между treasury и insurance fund.
+
+### При выкупе токенов (redeem_tokens)
+
+```
+proportional_lp  = amount * remaining_lp_allocation / remaining_token_amount
+redemption_fee   = proportional_lp * redemption_fee_bps / 10_000  → treasury
+```
+
+Пользователь платит `proportional_lp` в LP пул (возврат заёмных средств) + `redemption_fee` в treasury.
+
+### При продаже (sell_position)
+
+Комиссия не взимается. SOL от продажи через Pump.fun возвращается в LP пул пропорционально (`pool_recovery = min(sol_received, proportional_lp)`). Остаток (прибыль пользователя) остаётся на vault PDA и возвращается пользователю при `close_position`.
+
+### При permissionless close
+
+```
+close_reward = remaining_lp_allocation * close_reward_bps / 10_000
+```
+
+Награда выплачивается closer'у из LP пула.
+
+---
+
+## LP Pool Accounting
+
+LP пул учитывает SOL через три показателя:
+
+```
+total_liquidity     = общий SOL (физический на аккаунте + зарезервированный в позициях)
+reserved_liquidity  = SOL экспозиция в активных позициях
+available_liquidity = total_liquidity - reserved_liquidity = физический SOL на PDA
+```
+
+### Deposit
+
+```
+if supply == 0 || total_liquidity == 0:
+    lp_tokens = amount                          // 1:1 для первого депозита
+else:
+    lp_tokens = amount * lp_mint_supply / total_liquidity
+```
+
+SOL переводится на PDA lp_pool, mimi-LP минтятся на ATA депозитора.
+
+### Withdraw
+
+```
+sol_out = lp_amount * total_liquidity / lp_mint_supply
+```
+
+Проверяется: `sol_out <= available_liquidity` и rent-exemption аккаунта lp_pool. LP токены сжигаются, SOL переводится с PDA lp_pool на withdrawer.
+
+### LP Token Price
+
+```
+lp_token_price = total_liquidity * 1_000_000_000 / lp_mint_supply   // 9 decimals
+```
+
+Цена LP токена плавает: растёт при успешных продажах (fee revenue), падает при дефолтах (LP loss).
 
 ---
 
@@ -247,806 +263,664 @@ redemption_fee_bps = 200 (2%)
 
 ### 1. initialize_protocol
 
-Инициализация протокола. Создаёт `ProtocolConfig` и `LpPool`. Вызывается один раз.
+Инициализация протокола: создание config, LP pool, insurance fund и LP mint (Token2022).
 
-**Кто вызывает:** Admin (signer)
-
-**Accounts:**
-| Account | Тип | Описание |
-|---------|-----|----------|
-| `admin` | `Signer` (mut) | Администратор, платит за создание аккаунтов |
-| `protocol_config` | `Account<ProtocolConfig>` (init) | PDA `[b"protocol_config"]` |
-| `lp_pool` | `Account<LpPool>` (init) | PDA `[b"lp_pool"]` |
-| `system_program` | `Program<System>` | System Program |
+**Доступ:** Admin (первый вызов, аккаунты создаются через `init`)
 
 **Аргументы:**
+
 | Аргумент | Тип | Описание |
 |----------|-----|----------|
-| `executor` | `Pubkey` | Адрес авторизованного оператора |
-| `treasury` | `Pubkey` | Адрес получателя комиссий |
-| `rental_period` | `i64` | Период аренды в секундах (> 0) |
-| `rental_fee_rate` | `u64` | Стоимость аренды за период (lamports) |
-| `infrastructure_fee` | `u64` | Разовая комиссия (lamports) |
-| `redemption_fee_bps` | `u16` | Комиссия при выкупе (BPS, <= 10000) |
-| `grace_period` | `i64` | Допустимая просрочка (секунды, >= 0) |
+| `executor` | `Pubkey` | Адрес executor'а |
+| `treasury` | `Pubkey` | Адрес казначейства |
+| `fixed_fee` | `u64` | Фиксированная комиссия (lamports) |
+| `fee_bps` | `u16` | Процентная комиссия (basis points, ≤ 10000) |
+| `max_utilization_bps` | `u16` | Max утилизация пула (0 < bps ≤ 10000) |
+| `position_timeout` | `i64` | Таймаут позиции (секунды, > 0) |
+| `close_reward_bps` | `u16` | Награда за close (basis points, ≤ 10000) |
+| `insurance_split_bps` | `u16` | Доля в insurance (basis points, ≤ 10000) |
+| `redemption_fee_bps` | `u16` | Комиссия redeem (basis points, ≤ 10000) |
 
-**Валидация:**
-- `rental_period > 0`
-- `grace_period >= 0`
-- `redemption_fee_bps <= 10000`
+**Аккаунты:**
+
+| # | Аккаунт | Тип | Описание |
+|---|---------|-----|----------|
+| 0 | `admin` | Signer, mut | Создатель протокола, платит rent |
+| 1 | `protocol_config` | PDA, init | Seed: `[b"protocol_config"]` |
+| 2 | `lp_pool` | PDA, init | Seed: `[b"lp_pool"]` |
+| 3 | `insurance_fund` | PDA, init | Seed: `[b"insurance_fund"]` |
+| 4 | `lp_mint` | UncheckedAccount, mut | PDA: `[b"lp_mint"]`, инициализируется через Token2022 CPI |
+| 5 | `token_program` | Program | Token2022 (`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`) |
+| 6 | `system_program` | Program | System Program |
+| 7 | `rent` | Sysvar | Rent sysvar |
 
 **Логика:**
-1. Инициализирует `ProtocolConfig` со всеми параметрами, `status = Active`
-2. Инициализирует `LpPool` с нулевой ликвидностью, `authority = admin`
-3. Эмитит `ProtocolInitializedEvent`
-
-**Event:** `ProtocolInitializedEvent`
+1. Валидация: все bps ≤ 10000, position_timeout > 0
+2. Создание LP mint PDA через CPI к Token2022 (`create_account` + `initialize_mint2`): 9 decimals, authority = lp_mint PDA
+3. Инициализация ProtocolConfig: admin = signer, status = Active
+4. Инициализация LpPool: все нули, lp_mint = PDA
+5. Инициализация InsuranceFund: total_sol = 0
+6. Emit `ProtocolInitializedEvent`
 
 ---
 
 ### 2. update_protocol_config
 
-Обновление параметров протокола. Все параметры опциональны.
+Обновление параметров протокола. Все аргументы опциональны — обновляются только переданные.
 
-**Кто вызывает:** Admin
+**Доступ:** Admin (проверка `admin.key() == protocol_config.admin`)
 
-**Accounts:**
-| Account | Тип | Описание |
-|---------|-----|----------|
-| `admin` | `Signer` | Должен совпадать с `protocol_config.admin` |
-| `protocol_config` | `Account<ProtocolConfig>` (mut) | PDA `[b"protocol_config"]` |
+**Аргументы:**
 
-**Аргументы (все Option):**
 | Аргумент | Тип | Описание |
 |----------|-----|----------|
 | `new_executor` | `Option<Pubkey>` | Новый executor |
 | `new_treasury` | `Option<Pubkey>` | Новый treasury |
-| `new_rental_period` | `Option<i64>` | Новый период аренды (> 0) |
-| `new_rental_fee_rate` | `Option<u64>` | Новая стоимость аренды |
-| `new_infrastructure_fee` | `Option<u64>` | Новая infra fee |
-| `new_redemption_fee_bps` | `Option<u16>` | Новая redemption fee (<= 10000) |
-| `new_grace_period` | `Option<i64>` | Новый grace period (>= 0) |
-| `new_admin` | `Option<Pubkey>` | Передать права admin |
-| `new_status` | `Option<ProtocolStatus>` | Пауза / возобновление |
+| `new_fixed_fee` | `Option<u64>` | Новая фиксированная комиссия |
+| `new_fee_bps` | `Option<u16>` | Новая процентная комиссия |
+| `new_max_utilization_bps` | `Option<u16>` | Новый max utilization |
+| `new_position_timeout` | `Option<i64>` | Новый таймаут |
+| `new_close_reward_bps` | `Option<u16>` | Новая награда за close |
+| `new_insurance_split_bps` | `Option<u16>` | Новая доля insurance |
+| `new_redemption_fee_bps` | `Option<u16>` | Новая комиссия redeem |
+| `new_admin` | `Option<Pubkey>` | Новый admin (transfer ownership) |
+| `new_status` | `Option<ProtocolStatus>` | Новый статус (Active/Paused) |
 
-**Логика:** обновляет только переданные поля (Some), остальные не трогает.
+**Аккаунты:**
 
-**Event:** `ProtocolConfigUpdatedEvent`
+| # | Аккаунт | Тип | Описание |
+|---|---------|-----|----------|
+| 0 | `admin` | Signer | Текущий admin |
+| 1 | `protocol_config` | PDA, mut | Seed: `[b"protocol_config"]` |
+
+**Логика:**
+1. Проверка: signer == config.admin
+2. Обновление каждого переданного поля с валидацией (bps ≤ 10000, timeout > 0)
+3. Emit `ProtocolConfigUpdatedEvent`
 
 ---
 
 ### 3. deposit_lp
 
-Депозит SOL в LP пул.
+Депозит SOL в LP пул, получение mimi-LP токенов.
 
-**Кто вызывает:** LP Authority (`lp_pool.authority`)
-
-**Accounts:**
-| Account | Тип | Описание |
-|---------|-----|----------|
-| `authority` | `Signer` (mut) | Должен совпадать с `lp_pool.authority` |
-| `lp_pool` | `Account<LpPool>` (mut) | PDA `[b"lp_pool"]` |
-| `system_program` | `Program<System>` | System Program |
+**Доступ:** Любой пользователь
 
 **Аргументы:**
+
 | Аргумент | Тип | Описание |
 |----------|-----|----------|
-| `amount` | `u64` | Сумма депозита (lamports, > 0) |
+| `amount` | `u64` | Сумма SOL для депозита (lamports, > 0) |
+
+**Аккаунты:**
+
+| # | Аккаунт | Тип | Описание |
+|---|---------|-----|----------|
+| 0 | `depositor` | Signer, mut | Депозитор |
+| 1 | `lp_pool` | PDA, mut | Seed: `[b"lp_pool"]` |
+| 2 | `lp_mint` | UncheckedAccount, mut | LP mint PDA, проверяется vs lp_pool.lp_mint |
+| 3 | `depositor_lp_ata` | UncheckedAccount, mut | ATA депозитора для LP токенов |
+| 4 | `token_program` | Program | Token2022 |
+| 5 | `associated_token_program` | Program | Associated Token Program |
+| 6 | `system_program` | Program | System Program |
 
 **Логика:**
-1. Transfer SOL: `authority → lp_pool` (system_program::transfer)
-2. `lp_pool.total_liquidity += amount`
-3. `lp_pool.available_liquidity += amount`
-4. Эмитит `LpDepositedEvent`
-
-**Event:** `LpDepositedEvent`
+1. Проверка: amount > 0
+2. Рассчёт lp_tokens_to_mint: 1:1 если первый депозит, иначе `amount * supply / total_liquidity`
+3. Проверка: lp_tokens_to_mint > 0
+4. Transfer SOL: depositor → lp_pool PDA (system_program::transfer)
+5. Create ATA idempotently (CPI к Associated Token Program)
+6. Mint LP tokens: lp_mint → depositor_lp_ata (CPI к Token2022, authority = lp_mint PDA)
+7. Update lp_pool: total_liquidity += amount, available_liquidity = total - reserved, lp_mint_supply += minted
+8. Emit `LpDepositedEvent`
 
 ---
 
 ### 4. withdraw_lp
 
-Вывод доступного SOL из LP пула.
+Вывод SOL из LP пула, сжигание mimi-LP токенов.
 
-**Кто вызывает:** LP Authority (`lp_pool.authority`)
-
-**Accounts:**
-| Account | Тип | Описание |
-|---------|-----|----------|
-| `authority` | `Signer` (mut) | Должен совпадать с `lp_pool.authority` |
-| `lp_pool` | `Account<LpPool>` (mut) | PDA `[b"lp_pool"]` |
-| `system_program` | `Program<System>` | System Program |
+**Доступ:** Любой пользователь (holder LP токенов)
 
 **Аргументы:**
+
 | Аргумент | Тип | Описание |
 |----------|-----|----------|
-| `amount` | `u64` | Сумма вывода (lamports, > 0) |
+| `lp_amount` | `u64` | Количество LP токенов для сжигания (> 0) |
 
-**Валидация:**
-- `amount <= lp_pool.available_liquidity` (нельзя вывести зарезервированные средства)
+**Аккаунты:**
+
+| # | Аккаунт | Тип | Описание |
+|---|---------|-----|----------|
+| 0 | `withdrawer` | Signer, mut | Владелец LP токенов |
+| 1 | `lp_pool` | PDA, mut | Seed: `[b"lp_pool"]` |
+| 2 | `lp_mint` | UncheckedAccount, mut | LP mint PDA |
+| 3 | `withdrawer_lp_ata` | UncheckedAccount, mut | ATA withdrawer'а для LP токенов |
+| 4 | `token_program` | Program | Token2022 |
+| 5 | `system_program` | Program | System Program |
 
 **Логика:**
-1. Transfer SOL: `lp_pool → authority` (прямая манипуляция lamports)
-2. `lp_pool.total_liquidity -= amount`
-3. `lp_pool.available_liquidity -= amount`
-4. Эмитит `LpWithdrawnEvent`
-
-**Event:** `LpWithdrawnEvent`
+1. Проверка: lp_amount > 0, lp_mint_supply > 0
+2. Рассчёт: `sol_out = lp_amount * total_liquidity / lp_mint_supply`
+3. Проверка: sol_out > 0, sol_out ≤ available_liquidity, rent-exemption сохраняется
+4. Burn LP tokens: withdrawer сжигает из своего ATA (CPI к Token2022, authority = withdrawer)
+5. Transfer SOL: lp_pool PDA → withdrawer (прямой перенос lamports)
+6. Update lp_pool: total_liquidity -= sol_out, lp_mint_supply -= lp_amount, available = total - reserved
+7. Emit `LpWithdrawnEvent`
 
 ---
 
 ### 5. proxy_create_token
 
-CPI-прокси для создания токена на Pump.fun v2 через `create_v2`.
+Создание токена на Pump.fun v2 без открытия позиции (standalone).
 
-**Кто вызывает:** User
-
-**Accounts (16):**
-| Account | Тип | Описание |
-|---------|-----|----------|
-| `user` | `Signer` (mut) | Создатель токена, платит за создание |
-| `mint` | `Signer` (mut) | Свежий keypair для нового минта |
-| `pump_program` | `UncheckedAccount` | Pump.fun v2 program (`6EF8...`) |
-| `pump_global` | `UncheckedAccount` (mut) | Pump global state PDA `["global"]` |
-| `pump_mint_authority` | `UncheckedAccount` | Mint authority PDA `["mint-authority"]` |
-| `pump_bonding_curve` | `UncheckedAccount` (mut) | Bonding curve PDA `["bonding-curve", mint]` |
-| `pump_associated_bonding_curve` | `UncheckedAccount` (mut) | ATA bonding curve |
-| `mayhem_program` | `UncheckedAccount` (mut) | Mayhem program (`MAyh...`) |
-| `mayhem_global_params` | `UncheckedAccount` | Mayhem global params PDA |
-| `mayhem_sol_vault` | `UncheckedAccount` (mut) | Mayhem SOL vault |
-| `mayhem_state` | `UncheckedAccount` (mut) | Mayhem state PDA `["mayhem-state", mint]` |
-| `mayhem_token_vault` | `UncheckedAccount` (mut) | Mayhem token vault |
-| `pump_event_authority` | `UncheckedAccount` | Event authority `["__event_authority"]` |
-| `system_program` | `Program<System>` | System Program |
-| `token_program` | `UncheckedAccount` | Token2022 |
-| `associated_token_program` | `Program<AssociatedToken>` | ATA Program |
+**Доступ:** Любой пользователь
 
 **Аргументы:**
+
 | Аргумент | Тип | Описание |
 |----------|-----|----------|
-| `name` | `String` | Имя токена |
+| `name` | `String` | Название токена |
 | `symbol` | `String` | Символ токена |
 | `uri` | `String` | URI метаданных |
-| `is_mayhem_mode` | `bool` | Режим mayhem |
+| `is_mayhem_mode` | `bool` | Использовать Mayhem mode |
+
+**Аккаунты:**
+
+| # | Аккаунт | Тип | Описание |
+|---|---------|-----|----------|
+| 0 | `user` | Signer, mut | Создатель токена |
+| 1 | `mint` | Signer, mut | Новый keypair для токена |
+| 2 | `pump_program` | Pump.fun program | `6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P` |
+| 3 | `pump_global` | UncheckedAccount, mut | Pump global state |
+| 4 | `pump_mint_authority` | UncheckedAccount | Pump mint authority PDA |
+| 5 | `pump_bonding_curve` | UncheckedAccount, mut | Bonding curve PDA |
+| 6 | `pump_associated_bonding_curve` | UncheckedAccount, mut | Associated bonding curve token account |
+| 7 | `mayhem_program` | UncheckedAccount, mut | Mayhem program (`MAyhSmzXzV1pTf7LsNkrNwkWKTo4ougAJ1PPg47MD4e`) |
+| 8 | `mayhem_global_params` | UncheckedAccount | Mayhem global params PDA |
+| 9 | `mayhem_sol_vault` | UncheckedAccount, mut | Mayhem SOL vault |
+| 10 | `mayhem_state` | UncheckedAccount, mut | Mayhem state PDA |
+| 11 | `mayhem_token_vault` | UncheckedAccount, mut | Mayhem token vault |
+| 12 | `pump_event_authority` | UncheckedAccount | Event authority PDA |
+| 13 | `system_program` | Program | System Program |
+| 14 | `token_program` | UncheckedAccount | Token2022 |
+| 15 | `associated_token_program` | Program | Associated Token Program |
 
 **Логика:**
-1. Собирает `create_v2` instruction через `pump_fun::build_create_v2_instruction()`
-2. Вызывает `invoke()` с user + mint как signers
-3. Pump.fun создаёт: mint, bonding curve, ATA bonding curve
-4. Весь supply (~1 млрд токенов) минтится на `associated_bonding_curve`
-5. Эмитит `TokenCreatedEvent`
-
-**Event:** `TokenCreatedEvent`
+1. Build CPI `create_v2` instruction для Pump.fun v2
+2. `invoke()` (пользователь подписывает, mint keypair подписывает)
+3. Emit `TokenCreatedEvent`
 
 ---
 
-### 6. create_vault
+### 6. open_position
 
-Создание vault: резервирует LP, принимает user contribution, оплата fees.
+**Основная инструкция протокола.** Создаёт токен на Pump.fun, платит upfront fee, покупает токены через buyer PDA, консолидирует в vault.
 
-**Кто вызывает:** User
-
-**Accounts:**
-| Account | Тип | Описание |
-|---------|-----|----------|
-| `user` | `Signer` (mut) | Создатель vault, платит fees |
-| `token_mint` | `UncheckedAccount` | Минт уже существующего токена (Token2022) |
-| `vault_state` | `Account<LaunchVaultState>` (init) | PDA `[b"vault", user, mint]` |
-| `vault_token_account` | `UncheckedAccount` (mut) | ATA vault'а для токена — создаётся CPI в handler |
-| `protocol_config` | `Account<ProtocolConfig>` | Конфигурация |
-| `lp_pool` | `Account<LpPool>` (mut) | LP пул |
-| `treasury` | `UncheckedAccount` (mut) | Получатель fees |
-| `system_program` | `Program<System>` | System Program |
-| `token_program` | `UncheckedAccount` | Token2022 |
-| `associated_token_program` | `Program<AssociatedToken>` | ATA Program |
+**Доступ:** Любой пользователь (executor не требуется как signer — buyer PDA подписывают CPI)
 
 **Аргументы:**
+
 | Аргумент | Тип | Описание |
 |----------|-----|----------|
-| `lp_allocation` | `u64` | Сколько SOL выделить из LP (lamports, > 0) |
-| `user_contribution` | `u64` | Вклад пользователя (lamports, > 0) |
-
-**Валидация:**
-- `lp_allocation > 0`
-- `user_contribution > 0`
-- `lp_allocation <= lp_pool.available_liquidity`
-- `protocol_config.status == Active`
-
-**Логика:**
-1. Создаёт ATA vault'а через CPI к Associated Token Program (Token2022 compatible)
-2. Transfer fees: `user → treasury` (infrastructure_fee + rental_fee_rate)
-3. Transfer contribution: `user → lp_pool` (user_contribution)
-4. Reserve LP:
-   - `lp_pool.total_liquidity += user_contribution`
-   - `buy_budget = lp_allocation + user_contribution`
-   - `lp_pool.reserved_liquidity += buy_budget`
-   - `lp_pool.available_liquidity = total_liquidity - reserved_liquidity`
-5. Инициализирует vault_state:
-   - `status = ReadyForExecution`
-   - `total_token_amount = 0` (ещё не куплены)
-   - `rental_due_timestamp = now + rental_period`
-6. Эмитит `VaultCreatedEvent`
-
-**Event:** `VaultCreatedEvent`
-
----
-
-### 7. proxy_buy_token
-
-On-chain покупка токенов с bonding curve через CPI к Pump.fun `buy`. Vault PDA выступает покупателем.
-
-**Кто вызывает:** Executor
-
-**Accounts:**
-| Account | Тип | Описание |
-|---------|-----|----------|
-| `executor` | `Signer` | Должен совпадать с `protocol_config.executor` |
-| `vault_state` | `Account<LaunchVaultState>` (mut) | PDA vault (status = ReadyForExecution) |
-| `protocol_config` | `Account<ProtocolConfig>` | Конфигурация |
-| `lp_pool` | `Account<LpPool>` (mut) | LP пул |
-| `vault_token_account` | `UncheckedAccount` (mut) | ATA vault'а для токена |
-| `token_mint` | `UncheckedAccount` | Минт токена |
-| `pump_program` | `UncheckedAccount` | Pump.fun program |
-| `pump_global` | `UncheckedAccount` | Pump global state |
-| `pump_fee_recipient` | `UncheckedAccount` (mut) | Pump fee recipient |
-| `pump_bonding_curve` | `UncheckedAccount` (mut) | Bonding curve |
-| `pump_associated_bonding_curve` | `UncheckedAccount` (mut) | ATA bonding curve |
-| `pump_event_authority` | `UncheckedAccount` | Event authority |
-| `system_program` | `Program<System>` | System Program |
-| `token_program` | `UncheckedAccount` | Token2022 |
-| `rent` | `Sysvar<Rent>` | Rent sysvar |
-
-**Аргументы:**
-| Аргумент | Тип | Описание |
-|----------|-----|----------|
-| `amount` | `u64` | Количество токенов для покупки (> 0) |
-| `max_sol_cost` | `u64` | Максимальная стоимость (slippage protection) |
-
-**Валидация:**
-- `amount > 0`
-- `max_sol_cost <= buy_budget` (buy_budget = lp_allocation + user_contribution)
-- `vault_state.status == ReadyForExecution`
-
-**Логика:**
-1. Transfer SOL: `lp_pool → vault_state PDA` (invoke_signed с lp_pool seeds) — сумма = buy_budget
-2. CPI buy: vault PDA как buyer → Pump.fun bonding curve (invoke_signed с vault seeds)
-3. Токены приходят на `vault_token_account`
-4. Return excess SOL: `vault_state → lp_pool` (неиспользованный остаток)
-5. Update state:
-   - `vault.total_token_amount = actual_tokens` (читает реальный баланс из ATA по offset `[64..72]`)
-   - `vault.remaining_token_amount = actual_tokens`
-   - `vault.status = Active`
-6. Update LP pool:
-   - `lp_pool.total_liquidity -= sol_spent`
-   - `lp_pool.reserved_liquidity -= user_contribution` (LP allocation остаётся reserved до redeem/liquidate)
-   - `lp_pool.available_liquidity = total_liquidity - reserved_liquidity`
-7. Эмитит `TokenBoughtEvent`
-
-**Event:** `TokenBoughtEvent`
-
----
-
-### 8. pay_rental
-
-Оплата аренды за использование LP. Продлевает период аренды.
-
-**Кто вызывает:** User (владелец vault)
-
-**Accounts:**
-| Account | Тип | Описание |
-|---------|-----|----------|
-| `user` | `Signer` (mut) | Владелец vault |
-| `vault_state` | `Account<LaunchVaultState>` (mut) | PDA vault (status = Active, has_one = user) |
-| `protocol_config` | `Account<ProtocolConfig>` | Конфигурация |
-| `treasury` | `UncheckedAccount` (mut) | Получатель аренды |
-| `system_program` | `Program<System>` | System Program |
-
-**Аргументы:** нет
-
-**Логика:**
-1. Transfer: `user → treasury` (rental_fee_rate)
-2. `vault.rental_due_timestamp += rental_period`
-3. `vault.rental_status = Active`
-4. Эмитит `RentalPaidEvent`
-
-**Примечание:** можно платить заранее (до истечения текущего периода). Каждый вызов добавляет ещё один `rental_period` к дедлайну.
-
-**Event:** `RentalPaidEvent`
-
----
-
-### 9. redeem_tokens
-
-Выкуп токенов из vault. Пользователь возвращает пропорциональную часть LP + redemption fee и получает токены.
-
-**Кто вызывает:** User (владелец vault)
-
-**Accounts:**
-| Account | Тип | Описание |
-|---------|-----|----------|
-| `user` | `Signer` (mut) | Владелец vault |
-| `vault_state` | `Account<LaunchVaultState>` (mut) | PDA vault (status = Active) |
-| `protocol_config` | `Account<ProtocolConfig>` | Конфигурация |
-| `lp_pool` | `Account<LpPool>` (mut) | LP пул |
-| `treasury` | `UncheckedAccount` (mut) | Получатель redemption fee |
-| `vault_token_account` | `UncheckedAccount` (mut) | ATA vault'а |
-| `user_token_account` | `UncheckedAccount` (mut) | ATA пользователя |
-| `token_mint` | `UncheckedAccount` | Минт токена — нужен для transfer_checked |
-| `system_program` | `Program<System>` | System Program |
-| `token_program` | `UncheckedAccount` | Token2022 |
-
-**Аргументы:**
-| Аргумент | Тип | Описание |
-|----------|-----|----------|
-| `amount` | `u64` | Количество токенов для выкупа (> 0, <= remaining) |
-
-**Логика:**
-1. Расчёт пропорционального LP:
-   ```
-   proportional_lp = amount * remaining_lp_allocation / remaining_token_amount
-   ```
-2. Расчёт redemption fee:
-   ```
-   redemption_fee = proportional_lp * redemption_fee_bps / 10000
-   ```
-3. Обновление state (CEI — перед трансферами):
-   - `vault.remaining_token_amount -= amount`
-   - `vault.remaining_lp_allocation -= proportional_lp`
-   - Если `remaining_token_amount == 0` → `vault.status = Closed`
-4. Обновление LP pool:
-   - `lp_pool.total_liquidity += proportional_lp` (SOL возвращается в пул)
-   - `lp_pool.reserved_liquidity -= proportional_lp`
-   - `lp_pool.available_liquidity = total_liquidity - reserved_liquidity`
-5. Transfer LP: `user → lp_pool` (proportional_lp SOL)
-6. Transfer fee: `user → treasury` (redemption_fee SOL)
-7. Transfer tokens: `vault_token_account → user_token_account` (PDA signer)
-8. Эмитит `TokensRedeemedEvent`
-
-**Event:** `TokensRedeemedEvent`
-
----
-
-### 10. mark_defaulted
-
-Пометка vault как дефолтного. Permissionless — может вызвать любой.
-
-**Кто вызывает:** Anyone (cranker)
-
-**Accounts:**
-| Account | Тип | Описание |
-|---------|-----|----------|
-| `cranker` | `Signer` | Любой аккаунт |
-| `vault_state` | `Account<LaunchVaultState>` (mut) | PDA vault (status = Active) |
-| `protocol_config` | `Account<ProtocolConfig>` | Конфигурация |
-
-**Аргументы:** нет
-
-**Валидация:**
-- `vault_state.status == Active`
-- `current_time > rental_due_timestamp + grace_period`
-
-**Логика:**
-1. Проверяет что `now > rental_due + grace_period`
-2. `vault.status = Defaulted`
-3. `vault.rental_status = Overdue`
-4. Эмитит `VaultDefaultedEvent`
-
-**Event:** `VaultDefaultedEvent`
-
----
-
-### 11. liquidate_vault
-
-Ликвидация дефолтного vault. Все оставшиеся токены переходят executor'у. LP потерян.
-
-**Кто вызывает:** Executor
-
-**Accounts:**
-| Account | Тип | Описание |
-|---------|-----|----------|
-| `executor` | `Signer` | Должен совпадать с `protocol_config.executor` |
-| `vault_state` | `Account<LaunchVaultState>` (mut) | PDA vault (status = Defaulted) |
-| `protocol_config` | `Account<ProtocolConfig>` | Конфигурация |
-| `lp_pool` | `Account<LpPool>` (mut) | LP пул |
-| `vault_token_account` | `UncheckedAccount` (mut) | ATA vault'а |
-| `executor_token_account` | `UncheckedAccount` (mut) | ATA executor'а |
-| `token_mint` | `UncheckedAccount` | Минт токена — нужен для transfer_checked |
-| `token_program` | `UncheckedAccount` | Token2022 |
-
-**Аргументы:** нет
-
-**Логика:**
-1. Сохраняет `tokens_to_liquidate` и `lp_lost`
-2. Обновление state:
-   - `vault.remaining_token_amount = 0`
-   - `vault.remaining_lp_allocation = 0`
-   - `vault.status = Closed`
-3. LP потерян (штраф):
-   - `lp_pool.total_liquidity -= lp_lost`
-   - `lp_pool.reserved_liquidity -= lp_lost`
-   - `lp_pool.available_liquidity = total_liquidity - reserved_liquidity`
-4. Transfer tokens: `vault_token_account → executor_token_account` (PDA signer, Token2022 transfer_checked)
-5. Эмитит `VaultLiquidatedEvent`
-
-**Важно:** LP, выделенный под vault, безвозвратно потерян. Это стимулирует пользователей платить аренду вовремя.
-
-**Event:** `VaultLiquidatedEvent`
-
----
-
-### 12. close_vault
-
-Закрытие пустого vault. Возвращает rent пользователю.
-
-**Кто вызывает:** User (владелец vault)
-
-**Accounts:**
-| Account | Тип | Описание |
-|---------|-----|----------|
-| `user` | `Signer` (mut) | Владелец vault |
-| `vault_state` | `Account<LaunchVaultState>` (mut, close = user) | PDA vault (status = Closed) |
-| `vault_token_account` | `UncheckedAccount` (mut) | ATA vault'а (amount == 0) |
-| `token_program` | `UncheckedAccount` | Token2022 |
-| `system_program` | `Program<System>` | System Program |
-
-**Аргументы:** нет
-
-**Валидация:**
-- `vault_state.status == Closed`
-- Token account balance == 0 (проверяется чтением raw data по offset `[64..72]`)
-
-**Логика:**
-1. Закрывает `vault_token_account` через CPI `token_utils::build_close_account_instruction` (rent → user, Token2022 compatible)
-2. `vault_state` закрывается автоматически через Anchor `close = user`
-3. Эмитит `VaultClosedEvent`
-
-**Event:** `VaultClosedEvent`
-
----
-
-### 13. launch_bundle
-
-Атомарная мега-инструкция: создание токена + создание vault + 5 покупок с разных PDA-кошельков. Всё в одной Solana-транзакции.
-
-**Зачем:** имитация органического спроса — 5 покупок с 5 разных адресов вместо одной большой покупки.
-
-**Кто вызывает:** User + Executor (оба signer)
-
-**Accounts (24 фиксированных + remaining_accounts):**
-
-| Account | Тип | Описание |
-|---------|-----|----------|
-| `user` | `Signer` (mut) | Создатель токена, платит fees |
-| `mint` | `Signer` (mut) | Свежий keypair для нового минта |
-| `executor` | `Signer` | Авторизованный executor |
-| `vault_state` | `UncheckedAccount` (mut) | PDA vault — инициализируется вручную |
-| `protocol_config` | `Account<ProtocolConfig>` | Конфигурация (status = Active) |
-| `lp_pool` | `Account<LpPool>` (mut) | LP пул |
-| `treasury` | `UncheckedAccount` (mut) | Получатель fees |
-| `pump_program` | `UncheckedAccount` | Pump.fun program |
-| `pump_global` | `UncheckedAccount` (mut) | Pump global state |
-| `pump_mint_authority` | `UncheckedAccount` | Mint authority |
-| `pump_bonding_curve` | `UncheckedAccount` (mut) | Bonding curve |
-| `pump_associated_bonding_curve` | `UncheckedAccount` (mut) | ATA bonding curve |
-| `pump_event_authority` | `UncheckedAccount` | Event authority |
-| `pump_fee_recipient` | `UncheckedAccount` (mut) | Pump fee recipient |
-| `mayhem_program` | `UncheckedAccount` (mut) | Mayhem program |
-| `mayhem_global_params` | `UncheckedAccount` | Mayhem global params |
-| `mayhem_sol_vault` | `UncheckedAccount` (mut) | Mayhem SOL vault |
-| `mayhem_state` | `UncheckedAccount` (mut) | Mayhem state |
-| `mayhem_token_vault` | `UncheckedAccount` (mut) | Mayhem token vault |
-| `system_program` | `Program<System>` | System Program |
-| `token_program` | `UncheckedAccount` | Token2022 |
-| `associated_token_program` | `Program<AssociatedToken>` | ATA Program |
-| `rent` | `Sysvar<Rent>` | Rent sysvar |
-
-**remaining_accounts (1 + num_buyers * 2):**
-```
-[vault_token_account, buyer_0_pda, buyer_0_ata, buyer_1_pda, buyer_1_ata, ...]
-```
-
-**Аргументы:**
-| Аргумент | Тип | Описание |
-|----------|-----|----------|
-| `name` | `String` | Имя токена |
+| `name` | `String` | Название токена |
 | `symbol` | `String` | Символ токена |
 | `uri` | `String` | URI метаданных |
-| `is_mayhem_mode` | `bool` | Режим mayhem |
-| `lp_allocation` | `u64` | LP из пула (lamports, > 0) |
-| `user_contribution` | `u64` | Вклад пользователя (lamports, > 0) |
-| `buy_amounts` | `Vec<u64>` | Количество токенов для каждого buyer'а |
-| `max_sol_costs` | `Vec<u64>` | Максимальная стоимость для каждого buyer'а (slippage) |
+| `is_mayhem_mode` | `bool` | Mayhem mode при создании |
+| `lp_allocation` | `u64` | SOL из LP пула (lamports, > 0) |
+| `user_contribution` | `u64` | Собственный SOL пользователя (lamports, > 0) |
+| `buy_amounts` | `Vec<u64>` | Количество токенов для каждого buyer (1–5 элементов) |
+| `max_sol_costs` | `Vec<u64>` | Max SOL для каждого buyer |
 
-**Валидация:**
-- `1 <= num_buyers <= 5`
-- `buy_amounts.len() == max_sol_costs.len()`
-- `lp_allocation > 0`, `user_contribution > 0`
-- `lp_allocation <= lp_pool.available_liquidity`
-- `sum(max_sol_costs) <= lp_allocation + user_contribution`
-- `remaining_accounts.len() == 1 + num_buyers * 2`
-- Каждый buyer PDA проверяется через `find_program_address`
+**Аккаунты (именованные):**
 
-**Логика (8 шагов):**
+| # | Аккаунт | Тип | Описание |
+|---|---------|-----|----------|
+| 0 | `user` | Signer, mut | Создатель позиции |
+| 1 | `mint` | Signer, mut | Keypair нового токена |
+| 2 | `vault_state` | UncheckedAccount, mut | PDA vault (инициализируется вручную) |
+| 3 | `protocol_config` | PDA | Seed: `[b"protocol_config"]`, status == Active |
+| 4 | `lp_pool` | PDA, mut | Seed: `[b"lp_pool"]` |
+| 5 | `treasury` | UncheckedAccount, mut | Проверяется vs protocol_config.treasury |
+| 6 | `insurance_fund` | UncheckedAccount, mut | Seed: `[b"insurance_fund"]` |
+| 7 | `pump_program` | Pump.fun program | |
+| 8 | `pump_global` | mut | Pump global state |
+| 9 | `pump_mint_authority` | | Pump mint authority |
+| 10 | `pump_bonding_curve` | mut | Bonding curve PDA |
+| 11 | `pump_associated_bonding_curve` | mut | |
+| 12 | `pump_event_authority` | | |
+| 13 | `pump_fee_recipient` | mut | |
+| 14 | `mayhem_program` | mut | |
+| 15 | `mayhem_global_params` | | |
+| 16 | `mayhem_sol_vault` | mut | |
+| 17 | `mayhem_state` | mut | |
+| 18 | `mayhem_token_vault` | mut | |
+| 19 | `pump_global_volume_accumulator` | | |
+| 20 | `pump_creator_vault` | mut | |
+| 21 | `pump_fee_config` | | |
+| 22 | `pump_bonding_curve_v2` | | |
+| 23 | `pump_fee_program` | | `pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ` |
+| 24 | `system_program` | Program | |
+| 25 | `token_program` | | Token2022 |
+| 26 | `associated_token_program` | Program | |
+| 27 | `rent` | Sysvar | |
 
-**Шаг 1: CPI create_v2** — создание токена на Pump.fun
-- Полностью как в `proxy_create_token`
-- `invoke()` с user + mint signers
+**remaining_accounts (динамические):**
 
-**Шаг 2: Init vault_state PDA вручную**
-- Нельзя использовать Anchor `init` потому что mint не существует в момент десериализации accounts
-- `invoke_signed` → `system_instruction::create_account` с vault seeds
-- User платит rent
-
-**Шаг 3: Create vault ATA**
-- CPI к Associated Token Program
-- Создаёт ATA для vault PDA по минту нового токена
-
-**Шаг 4: Pay fees + reserve LP**
-- `user → treasury`: infrastructure_fee + rental_fee_rate
-- `user → lp_pool`: user_contribution
-- `lp_pool.reserved_liquidity += lp_allocation`
-- `lp_pool.available_liquidity -= lp_allocation`
-
-**Шаг 5: Loop по buyer'ам (0..N)**
-Для каждого buyer (i = 0..num_buyers):
 ```
-a) LP pool → buyer PDA (SOL, invoke_signed lp_pool seeds)
-b) Create buyer ATA via CPI (Token2022)
-c) CPI buy на Pump.fun (invoke_signed buyer seeds)
-d) Transfer tokens: buyer ATA → vault ATA (Token2022 transfer_checked, invoke_signed buyer seeds)
-e) Return unused SOL: buyer PDA → lp_pool
+[vault_token_account, buyer_0_pda, buyer_0_ata, buyer_0_vol, buyer_1_pda, buyer_1_ata, buyer_1_vol, ...]
 ```
 
-Buyer PDA seeds: `[b"buyer", vault_pda, &[index], &[bump]]`
+Итого: `1 + num_buyers * 3` remaining accounts.
 
-**Шаг 6: Write vault state**
-- Вручную записывает Anchor discriminator + сериализованные данные
-- `status = Active`, `total_token_amount = total_tokens_bought`
+**Логика (7 шагов):**
 
-**Шаг 7: Update LP pool accounting**
-- `lp_pool.total_liquidity -= total_sol_spent`
-- `lp_pool.reserved_liquidity -= lp_allocation`
+1. **Validation:**
+   - 1 ≤ num_buyers ≤ 5
+   - buy_amounts.len() == max_sol_costs.len()
+   - lp_allocation > 0, user_contribution > 0
+   - lp_allocation ≤ available_liquidity
+   - Utilization cap: `(reserved + lp_allocation) / total_liquidity ≤ max_utilization_bps`
+   - remaining_accounts.len() == 1 + num_buyers * 3
+   - sum(max_sol_costs) ≤ lp_allocation + user_contribution
 
-**Шаг 8: Emit event**
-- `LaunchBundleEvent` с итоговыми данными
+2. **Calculate & pay upfront fee:**
+   - `percentage_fee = lp_allocation * fee_bps / 10000`
+   - `total_fee = fixed_fee + percentage_fee`
+   - `insurance_amount = total_fee * insurance_split_bps / 10000` → insurance_fund
+   - `treasury_amount = total_fee - insurance_amount` → treasury
 
-**Compute Budget:** ~910k CU (лимит 1.4M с ComputeBudget)
+3. **CPI create_v2:** Создание токена на Pump.fun через invoke() (user и mint подписывают)
 
-**Event:** `LaunchBundleEvent`
+4. **Initialize vault_state PDA:** Ручное создание аккаунта через `create_account` + invoke_signed
+
+5. **Create vault ATA:** ATA vault_pda для token_mint
+
+6. **Reserve LP + Buy loop (для каждого buyer i):**
+   - Reserve: lp_pool.reserved += lp_allocation, available = total - reserved
+   - Fund buyer PDA: user → buyer_pda_i (max_sol_costs[i] SOL)
+   - Create buyer ATA
+   - CPI buy: buyer PDA подписывает через invoke_signed
+   - Read actual tokens purchased
+   - Transfer tokens: buyer ATA → vault ATA
+   - Close buyer ATA (rent → user)
+   - Return unused SOL: buyer PDA → user
+
+7. **Finalize:**
+   - Reimburse user for LP pool share: `pool_share = min(total_sol_spent, lp_allocation)`, pool → user
+   - Adjust reservation if buys cost less than lp_allocation
+   - Write vault state: status = Active, actual lp_deployed, total tokens, etc.
+   - Emit `PositionOpenedEvent`
+
+---
+
+### 7. sell_position
+
+Продажа токенов через Pump.fun CPI. SOL возвращается в LP пул (пропорционально LP allocation).
+
+**Доступ:** Vault owner ИЛИ executor (keeper)
+
+**Аргументы:**
+
+| Аргумент | Тип | Описание |
+|----------|-----|----------|
+| `amount` | `u64` | Количество токенов для продажи (> 0) |
+| `min_sol_output` | `u64` | Минимальный SOL от продажи (slippage protection) |
+
+**Аккаунты:**
+
+| # | Аккаунт | Тип | Описание |
+|---|---------|-----|----------|
+| 0 | `seller` | Signer, mut | vault_state.user ИЛИ protocol_config.executor |
+| 1 | `vault_state` | PDA, mut | Seed: `[b"vault", user, mint]`, status == Active |
+| 2 | `protocol_config` | PDA | |
+| 3 | `lp_pool` | PDA, mut | |
+| 4 | `vault_token_account` | UncheckedAccount, mut | ATA vault PDA для token_mint |
+| 5 | `token_mint` | UncheckedAccount | mint == vault_state.token_mint |
+| 6–16 | Pump.fun accounts | | global, fee_recipient, bonding_curve, associated_bonding_curve, event_authority, creator_vault, fee_config, bonding_curve_v2, pump_fee_program |
+| 17 | `system_program` | Program | |
+| 18 | `token_program` | | Token2022 |
+
+**Логика:**
+1. Проверка: amount > 0, amount ≤ remaining_token_amount
+2. Запись vault lamports до продажи
+3. CPI sell: vault PDA подписывает через invoke_signed (SOL приходит на vault PDA)
+4. `sol_received = vault_lamports_after - vault_lamports_before`
+5. Чтение фактического остатка токенов, рассчёт tokens_sold
+6. `proportional_lp = tokens_sold * remaining_lp / remaining_tokens`
+7. `pool_recovery = min(sol_received, proportional_lp)` → transfer vault PDA → lp_pool
+8. Update vault: remaining_token_amount, remaining_lp_allocation; если tokens == 0 → status = Closed
+9. Update lp_pool: reserved -= proportional_lp; если lp_loss > 0: total -= lp_loss; available = total - reserved
+10. Emit `PositionSoldEvent`
+
+> **Примечание:** Если SOL от продажи > proportional_lp, разница (прибыль) остаётся на vault PDA и возвращается user при close_position.
+
+---
+
+### 8. redeem_tokens
+
+Возврат токенов пользователю за SOL (пользователь оплачивает LP долг + redemption fee).
+
+**Доступ:** Vault owner
+
+**Аргументы:**
+
+| Аргумент | Тип | Описание |
+|----------|-----|----------|
+| `amount` | `u64` | Количество токенов для выкупа (> 0) |
+
+**Аккаунты:**
+
+| # | Аккаунт | Тип | Описание |
+|---|---------|-----|----------|
+| 0 | `user` | Signer, mut | vault_state.user |
+| 1 | `vault_state` | PDA, mut | Seed: `[b"vault", user, mint]`, status == Active |
+| 2 | `protocol_config` | PDA | |
+| 3 | `lp_pool` | PDA, mut | |
+| 4 | `treasury` | UncheckedAccount, mut | protocol_config.treasury |
+| 5 | `vault_token_account` | UncheckedAccount, mut | ATA vault PDA |
+| 6 | `user_token_account` | UncheckedAccount, mut | ATA пользователя |
+| 7 | `token_mint` | UncheckedAccount | vault_state.token_mint |
+| 8 | `system_program` | Program | |
+| 9 | `token_program` | | Token2022 |
+
+**Логика:**
+1. Проверка: amount > 0, amount ≤ remaining_token_amount
+2. `proportional_lp = amount * remaining_lp_allocation / remaining_token_amount`
+3. Проверка: proportional_lp > 0
+4. `redemption_fee = proportional_lp * redemption_fee_bps / 10000`
+5. CEI: обновление state до трансферов
+   - remaining_token_amount -= amount
+   - remaining_lp_allocation -= proportional_lp
+   - если remaining_tokens == 0 → status = Closed
+6. Update lp_pool: reserved -= proportional_lp, available = total - reserved
+7. Transfer SOL: user → lp_pool (proportional_lp)
+8. Transfer SOL: user → treasury (redemption_fee)
+9. Transfer tokens: vault ATA → user ATA (CPI Token2022, vault PDA подписывает)
+10. Emit `TokensRedeemedEvent`
+
+---
+
+### 9. close_position
+
+Финальная очистка vault: закрытие token account, возврат rent, удаление vault state.
+
+**Доступ:**
+- Vault owner: когда status == Closed или TimedOut
+- Любой: когда `current_time > open_timestamp + position_timeout` (permissionless)
+
+**Аккаунты:**
+
+| # | Аккаунт | Тип | Описание |
+|---|---------|-----|----------|
+| 0 | `closer` | Signer, mut | Owner или любой (после timeout) |
+| 1 | `vault_state` | PDA, mut | Seed: `[b"vault", user, mint]` |
+| 2 | `protocol_config` | PDA | |
+| 3 | `lp_pool` | PDA, mut | |
+| 4 | `vault_owner` | UncheckedAccount, mut | vault_state.user (получает rent refund) |
+| 5 | `vault_token_account` | UncheckedAccount, mut | ATA vault PDA |
+| 6 | `token_program` | | Token2022 |
+| 7 | `system_program` | Program | |
+
+**Логика:**
+1. Определение is_owner = (closer == vault.user)
+2. Если owner: проверка status == Closed || TimedOut
+3. Если не owner: проверка `current_time > open_timestamp + position_timeout`
+4. Проверка: token account пустой (amount == 0)
+5. Рассчёт close_reward для permissionless closer (если !is_owner)
+6. Если remaining_lp > 0:
+   - lp_pool.reserved -= remaining_lp
+   - lp_pool.total -= remaining_lp (LP loss — дефолт)
+   - lp_pool.total_defaults += 1
+7. lp_pool.total_positions_closed += 1
+8. Если close_reward > 0: transfer lp_pool → closer
+9. Close vault token account (CPI Token2022): rent → vault_owner
+10. Если !is_owner: vault.status = TimedOut
+11. Emit `PositionClosedEvent`
+12. Close vault_state account: все lamports → vault_owner, zero-out + resize(0)
+
+---
+
+### 10. force_close_position
+
+Экстренная ликвидация: executor продаёт все оставшиеся токены с min_sol_output = 0.
+
+**Доступ:** Executor only
+
+**Аккаунты:**
+
+| # | Аккаунт | Тип | Описание |
+|---|---------|-----|----------|
+| 0 | `executor` | Signer | protocol_config.executor |
+| 1 | `vault_state` | PDA, mut | status == Active |
+| 2 | `protocol_config` | PDA | |
+| 3 | `lp_pool` | PDA, mut | |
+| 4 | `vault_token_account` | UncheckedAccount, mut | ATA vault PDA |
+| 5 | `token_mint` | UncheckedAccount | |
+| 6–16 | Pump.fun accounts | | Аналогично sell_position |
+| 17 | `system_program` | Program | |
+| 18 | `token_program` | | Token2022 |
+
+**Логика:**
+1. Запись vault lamports до продажи
+2. CPI sell всех remaining tokens с `min_sol_output = 0` (принимает любую цену)
+3. `sol_recovered = vault_lamports_after - vault_lamports_before`
+4. Transfer восстановленного SOL: vault PDA → lp_pool (с учётом rent-exemption)
+5. `lp_loss = lp_at_risk - sol_to_pool`
+6. Update vault: remaining = 0, status = Closed
+7. Update lp_pool:
+   - reserved -= lp_at_risk
+   - если lp_loss > 0: total -= lp_loss, total_defaults += 1
+   - available = total - reserved
+   - total_positions_closed += 1
+8. Emit `PositionForceClosedEvent`
+
+> **Примечание:** После force_close позиция в статусе Closed, но vault_state аккаунт остаётся. Owner должен вызвать close_position для утилизации аккаунта и возврата rent.
 
 ---
 
 ## CPI к Pump.fun v2
 
-Все CPI к Pump.fun строятся вручную в `cpi/pump_fun.rs`.
+Program ID: `6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P`
 
-### Константы
+### create_v2 (16 accounts)
 
-```rust
-PUMP_FUN_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
-MAYHEM_PROGRAM_ID   = "MAyhSmzXzV1pTf7LsNkrNwkWKTo4ougAJ1PPg47MD4e"
-MAX_BUYERS          = 5
-BUYER_SEED          = b"buyer"
+Создание нового токена на bonding curve.
+
+| # | Аккаунт | Writable | Signer |
+|---|---------|----------|--------|
+| 0 | mint | ✓ | ✓ |
+| 1 | mint_authority | | |
+| 2 | bonding_curve | ✓ | |
+| 3 | associated_bonding_curve | ✓ | |
+| 4 | global | ✓ | |
+| 5 | user | ✓ | ✓ |
+| 6 | system_program | | |
+| 7 | token_program | | |
+| 8 | associated_token_program | | |
+| 9 | mayhem_program | ✓ | |
+| 10 | mayhem_global_params | | |
+| 11 | mayhem_sol_vault | ✓ | |
+| 12 | mayhem_state | ✓ | |
+| 13 | mayhem_token_vault | ✓ | |
+| 14 | event_authority | | |
+| 15 | pump_program (self) | | |
+
+Discriminator: `[0xd6, 0x90, 0x4c, 0xec, 0x5f, 0x8b, 0x31, 0xb4]`
+
+Args: `CreateV2Args { name, symbol, uri, creator, is_mayhem_mode, is_cashback_enabled: None }`
+
+### buy (17 accounts)
+
+Покупка токенов на bonding curve.
+
+| # | Аккаунт | Writable | Signer |
+|---|---------|----------|--------|
+| 0 | global | | |
+| 1 | fee_recipient | ✓ | |
+| 2 | mint | | |
+| 3 | bonding_curve | ✓ | |
+| 4 | associated_bonding_curve | ✓ | |
+| 5 | associated_user (buyer ATA) | ✓ | |
+| 6 | user (buyer PDA) | ✓ | ✓ |
+| 7 | system_program | | |
+| 8 | token_program | | |
+| 9 | creator_vault | ✓ | |
+| 10 | event_authority | | |
+| 11 | pump_program (self) | | |
+| 12 | global_volume_accumulator | | |
+| 13 | user_volume_accumulator | ✓ | |
+| 14 | fee_config | | |
+| 15 | fee_program | | |
+| 16 | bonding_curve_v2 | | |
+
+Discriminator: `[0x66, 0x06, 0x3d, 0x12, 0x01, 0xda, 0xeb, 0xea]`
+
+Args: `BuyArgs { amount: u64, max_sol_cost: u64 }`
+
+### sell (15 accounts)
+
+Продажа токенов обратно на bonding curve.
+
+| # | Аккаунт | Writable | Signer |
+|---|---------|----------|--------|
+| 0 | global | | |
+| 1 | fee_recipient | ✓ | |
+| 2 | mint | | |
+| 3 | bonding_curve | ✓ | |
+| 4 | associated_bonding_curve | ✓ | |
+| 5 | associated_user (vault ATA) | ✓ | |
+| 6 | user (vault PDA) | ✓ | ✓ |
+| 7 | system_program | | |
+| 8 | creator_vault | ✓ | |
+| 9 | token_program | | |
+| 10 | event_authority | | |
+| 11 | pump_program (self) | | |
+| 12 | fee_config | | |
+| 13 | fee_program | | |
+| 14 | bonding_curve_v2 | | |
+
+Discriminator: `[0x33, 0xe6, 0x85, 0xa4, 0x01, 0x7f, 0x83, 0xad]`
+
+Args: `SellArgs { amount: u64, min_sol_output: u64 }`
+
+> **Важно:** Layout sell отличается от buy:
+> - creator_vault на позиции 8 (перед token_program)
+> - Нет volume accumulators (они только для buy)
+> - 15 аккаунтов (vs 17 для buy)
+
+### Внешние программы
+
+| Программа | ID |
+|-----------|-----|
+| Pump.fun v2 | `6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P` |
+| Mayhem | `MAyhSmzXzV1pTf7LsNkrNwkWKTo4ougAJ1PPg47MD4e` |
+| PumpFun Fee Program | `pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ` |
+| Token2022 | `TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb` |
+| Associated Token | `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL` |
+
+### PumpFun PDA Derivation Helpers
+
 ```
-
-### create_v2
-
-Создание токена. Дискриминатор: `d6904cec5f8b31b4`
-
-**Аргументы (CreateV2Args):**
-```rust
-struct CreateV2Args {
-    name: String,
-    symbol: String,
-    uri: String,
-    creator: Pubkey,
-    is_mayhem_mode: bool,
-    is_cashback_enabled: OptionBool,  // всегда None
-}
+global_volume_accumulator: PDA [b"global_volume_accumulator"] from PUMP_FUN_PROGRAM_ID
+user_volume_accumulator:   PDA [b"user_volume_accumulator", user] from PUMP_FUN_PROGRAM_ID
+creator_vault:             PDA [b"creator-vault", creator] from PUMP_FUN_PROGRAM_ID
+fee_config:                PDA [b"fee_config", FEE_SEED_CONST] from FEE_PROGRAM_ID
+bonding_curve_v2:          PDA [b"bonding-curve-v2", mint] from PUMP_FUN_PROGRAM_ID
 ```
-
-**Accounts (16):**
-1. `mint` (signer, mut) — новый keypair
-2. `mint_authority` (readonly)
-3. `bonding_curve` (mut)
-4. `associated_bonding_curve` (mut)
-5. `global` (mut)
-6. `user` (signer, mut)
-7. `system_program` (readonly)
-8. `token_program` (readonly) — Token2022
-9. `associated_token_program` (readonly)
-10. `mayhem_program` (readonly)
-11. `mayhem_global_params` (readonly)
-12. `mayhem_sol_vault` (mut)
-13. `mayhem_state` (mut)
-14. `mayhem_token_vault` (mut)
-15. `event_authority` (readonly)
-16. `pump_program` (readonly)
-
-### buy
-
-Покупка токенов с bonding curve. Дискриминатор: `66063d1201daebea`
-
-**Аргументы (BuyArgs):**
-```rust
-struct BuyArgs {
-    amount: u64,         // количество токенов
-    max_sol_cost: u64,   // максимальная стоимость (slippage)
-}
-```
-
-**Accounts (12):**
-1. `global` (readonly)
-2. `fee_recipient` (mut)
-3. `mint` (readonly)
-4. `bonding_curve` (mut)
-5. `associated_bonding_curve` (mut)
-6. `associated_user` (mut) — ATA покупателя
-7. `user` (signer, mut) — покупатель (платит SOL)
-8. `system_program` (readonly)
-9. `token_program` (readonly) — Token2022
-10. `rent` (readonly)
-11. `event_authority` (readonly)
-12. `pump_program` (readonly)
 
 ---
 
 ## CPI Token2022 (token_utils)
 
-Утилиты для ручного построения CPI-инструкций к SPL Token / Token2022. Находятся в `cpi/token_utils.rs`. Используются вместо типизированных Anchor-хелперов для совместимости с Token2022.
+Вспомогательные функции в `cpi/token_utils.rs` для ручного построения инструкций Token2022:
 
-### build_transfer_checked_instruction
-
-Построение `TransferChecked` инструкции (opcode 12).
-
-```rust
-pub fn build_transfer_checked_instruction(
-    token_program: &Pubkey,   // SPL Token или Token2022
-    source: &Pubkey,          // Откуда
-    mint: &Pubkey,            // Минт токена
-    destination: &Pubkey,     // Куда
-    authority: &Pubkey,       // Authority (signer)
-    amount: u64,              // Количество токенов
-    decimals: u8,             // Decimals минта (6 для Pump.fun)
-) -> Instruction
-```
-
-**Используется в:** `redeem_tokens`, `liquidate_vault`
-
-### build_close_account_instruction
-
-Построение `CloseAccount` инструкции (opcode 9).
-
-```rust
-pub fn build_close_account_instruction(
-    token_program: &Pubkey,   // SPL Token или Token2022
-    account: &Pubkey,         // Token account для закрытия
-    destination: &Pubkey,     // Получатель rent
-    authority: &Pubkey,       // Authority (signer)
-) -> Instruction
-```
-
-**Используется в:** `close_vault`
-
-### build_create_ata_instruction
-
-Построение `CreateAssociatedTokenAccount` инструкции (opcode 0).
-
-```rust
-pub fn build_create_ata_instruction(
-    payer: &Pubkey,           // Кто платит за создание
-    wallet: &Pubkey,          // Владелец ATA
-    mint: &Pubkey,            // Минт токена
-    token_program: &Pubkey,   // SPL Token или Token2022
-    ata_program: &Pubkey,     // Associated Token Program
-) -> Instruction
-```
-
-**Используется в:** `create_vault`
-
-**Примечание:** `launch_bundle` содержит собственные локальные копии этих функций, т.к. ему нужна полная автономность в рамках одной атомарной транзакции.
+| Функция | Описание |
+|---------|----------|
+| `read_token_account_amount()` | Чтение amount из raw token account data (offset 64..72) |
+| `build_transfer_checked_instruction()` | TransferChecked (instruction index = 12) |
+| `build_mint_to_instruction()` | MintTo (instruction index = 7) |
+| `build_burn_instruction()` | Burn (instruction index = 8) |
+| `build_close_account_instruction()` | CloseAccount (instruction index = 9) |
+| `build_initialize_mint2_instruction()` | InitializeMint2 (instruction index = 20) |
+| `build_create_ata_instruction()` | Create ATA via Associated Token Program |
+| `build_create_ata_idempotent_instruction()` | Create ATA idempotent (instruction index = 1) |
 
 ---
 
 ## SOL Flow
 
-### При создании vault (create_vault / launch_bundle)
-
 ```
-User
- ├── infrastructure_fee ──────→ Treasury
- ├── rental_fee_rate ─────────→ Treasury
- └── user_contribution ───────→ LP Pool (total_liquidity += user_contribution)
-                                   │
-                           buy_budget = lp_allocation + user_contribution
-                           reserved_liquidity += buy_budget
-```
-
-### При покупке токенов (proxy_buy_token)
-
-```
-LP Pool (buy_budget = lp_allocation + user_contribution)
- └──→ Vault PDA ──→ Pump.fun Bonding Curve (CPI buy)
-                  │
-                  └──→ Неиспользованный SOL → LP Pool (возврат)
-```
-
-### При покупке токенов (launch_bundle)
-
-```
-LP Pool
- ├──→ Buyer PDA 0 ──→ Pump.fun Bonding Curve
- │                  └──→ Остаток SOL → LP Pool
- ├──→ Buyer PDA 1 ──→ Pump.fun Bonding Curve
- │                  └──→ Остаток SOL → LP Pool
- ├──→ Buyer PDA 2 ──→ ...
- ├──→ Buyer PDA 3 ──→ ...
- └──→ Buyer PDA 4 ──→ ...
-```
-
-### При выкупе (redeem_tokens)
-
-```
-User
- ├── proportional_lp ─────────→ LP Pool (возврат ликвидности)
- └── redemption_fee ──────────→ Treasury
-```
-
-### При ликвидации (liquidate_vault)
-
-```
-LP Pool
- └── lp_lost ── СПИСЫВАЕТСЯ (total_liquidity -= lp_lost, reserved -= lp_lost)
-     LP безвозвратно потерян
-```
-
-### При оплате аренды (pay_rental)
-
-```
-User
- └── rental_fee_rate ─────────→ Treasury
+┌────────────────────────────────────────────────────────────────────┐
+│                          SOL FLOW                                  │
+├────────────────────────────────────────────────────────────────────┤
+│                                                                    │
+│  LP Provider                                                       │
+│    │  deposit_lp(amount)                                           │
+│    └──────────► [LpPool PDA] ◄─── withdraw_lp (sol_out)            │
+│                     │                    │                          │
+│                     │ reimburse pool_share                          │
+│                     ▼                    ▲                          │
+│  User ──── open_position ──────►  user (refund unused)             │
+│    │                                                               │
+│    ├── total_fee ──► [Treasury] (treasury_amount)                  │
+│    │                                                               │
+│    ├── total_fee ──► [Insurance Fund] (insurance_amount)           │
+│    │                                                               │
+│    ├── max_sol_costs ──► [Buyer PDAs] ──► Pump.fun (buy)           │
+│    │                          │                                    │
+│    │                          └── unused SOL ──► user              │
+│    │                                                               │
+│  sell_position:                                                    │
+│    Pump.fun ──► [Vault PDA] (sol_received)                         │
+│    [Vault PDA] ──► [LpPool] (pool_recovery = min(sol, prop_lp))   │
+│    [Vault PDA] остаток = прибыль user ──► при close_position       │
+│                                                                    │
+│  redeem_tokens:                                                    │
+│    User ──► [LpPool] (proportional_lp)                             │
+│    User ──► [Treasury] (redemption_fee)                            │
+│                                                                    │
+│  close_position:                                                   │
+│    [Vault PDA] ──► [Vault Owner] (все оставшиеся lamports)         │
+│    [LpPool] ──► [Closer] (close_reward, если permissionless)       │
+│                                                                    │
+│  force_close_position:                                             │
+│    Pump.fun ──► [Vault PDA] (sol_recovered)                        │
+│    [Vault PDA] ──► [LpPool] (min(sol_recovered, lp_at_risk))      │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Token Flow
 
-### Создание токена
-
 ```
-Pump.fun create_v2
- └──→ Весь supply (~1 млрд) ──→ Associated Bonding Curve ATA
-```
-
-### Покупка (proxy_buy_token)
-
-```
-Bonding Curve ATA
- └──→ Токены ──→ Vault Token Account (ATA vault PDA)
-```
-
-### Покупка (launch_bundle)
-
-```
-Bonding Curve ATA
- ├──→ Buyer 0 ATA ──→ (transfer_checked) ──→ Vault ATA
- ├──→ Buyer 1 ATA ──→ (transfer_checked) ──→ Vault ATA
- ├──→ Buyer 2 ATA ──→ (transfer_checked) ──→ Vault ATA
- ├──→ Buyer 3 ATA ──→ (transfer_checked) ──→ Vault ATA
- └──→ Buyer 4 ATA ──→ (transfer_checked) ──→ Vault ATA
-```
-
-### Выкуп (redeem_tokens)
-
-```
-Vault ATA
- └──→ Токены ──→ User Token Account (ATA пользователя)
-```
-
-### Ликвидация (liquidate_vault)
-
-```
-Vault ATA
- └──→ Все токены ──→ Executor Token Account (ATA executor'а)
+┌────────────────────────────────────────────────────────────────────┐
+│                        TOKEN FLOW                                  │
+├────────────────────────────────────────────────────────────────────┤
+│                                                                    │
+│  open_position:                                                    │
+│    Pump.fun ──► [Buyer ATA] ──► [Vault ATA]                       │
+│    (для каждого buyer_i, токены консолидируются в vault ATA)       │
+│    buyer ATA закрывается после трансфера                           │
+│                                                                    │
+│  sell_position:                                                    │
+│    [Vault ATA] ──► Pump.fun (bonding curve sell)                   │
+│    (vault PDA подписывает CPI sell)                                │
+│                                                                    │
+│  redeem_tokens:                                                    │
+│    [Vault ATA] ──► [User ATA]                                     │
+│    (vault PDA подписывает transfer_checked)                        │
+│                                                                    │
+│  close_position:                                                   │
+│    vault ATA закрывается (rent → vault owner)                      │
+│    vault_state аккаунт закрывается (lamports → vault owner)        │
+│                                                                    │
+│  LP tokens (mimi-LP, Token2022, 9 decimals):                      │
+│    deposit_lp:  mint lp_tokens ──► depositor ATA                   │
+│    withdraw_lp: depositor ATA ──► burn                             │
+│    (mint authority = lp_mint PDA)                                  │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -1054,374 +928,259 @@ Vault ATA
 ## Vault Lifecycle
 
 ```
-                 create_vault
-                 launch_bundle
-                      │
-                      ▼
-          ┌─ ReadyForExecution ─┐
-          │   (только create_vault)  │
-          │                     │
-          │  proxy_buy_token    │
-          │                     │
-          ▼                     │
-       Active ◄─────────────────┘
-          │         (launch_bundle создаёт сразу Active)
-          │
-          ├── pay_rental ──→ Active (продление)
-          │
-          ├── redeem_tokens (partial) ──→ Active
-          │
-          ├── redeem_tokens (all) ──→ Closed ──→ close_vault ──→ [удалён]
-          │
-          └── (просрочка + grace_period)
-                      │
-               mark_defaulted
-                      │
-                      ▼
-                 Defaulted
-                      │
-               liquidate_vault
-                      │
-                      ▼
-                   Closed ──→ close_vault ──→ [удалён]
+                  ┌──────────────┐
+                  │ open_position │
+                  └──────┬───────┘
+                         │
+                         ▼
+                  ┌──────────────┐
+                  │    Active     │
+                  └──┬───┬───┬───┘
+                     │   │   │
+        ┌────────────┘   │   └────────────┐
+        ▼                ▼                ▼
+  sell_position    redeem_tokens   force_close_position
+  (partial/full)   (partial/full)   (executor only)
+        │                │                │
+        │                │                ▼
+        │                │         ┌──────────┐
+        │                │         │  Closed   │
+        │ all sold       │ all     │(force)    │
+        ▼ redeemed       ▼        └─────┬─────┘
+  ┌──────────┐    ┌──────────┐          │
+  │  Closed   │    │  Closed   │         │
+  │(by sell)  │    │(by redeem)│         │
+  └─────┬─────┘    └─────┬─────┘         │
+        │                │               │
+        └────────┬───────┘               │
+                 │                       │
+                 ▼                       ▼
+          ┌──────────────┐        ┌──────────────┐
+          │close_position│        │close_position│
+          │ (by owner)   │        │ (by owner)   │
+          └──────────────┘        └──────────────┘
+
+
+  === Permissionless path (timeout) ===
+
+  Active ──── (timeout expires) ────►  close_position (by anyone)
+                                              │
+                                              ▼
+                                        ┌──────────┐
+                                        │ TimedOut  │
+                                        └──────────┘
+                                    (vault_state deleted,
+                                     rent → vault owner,
+                                     close_reward → closer,
+                                     remaining LP → loss)
 ```
 
-### Переходы статусов
+### Состояния vault
 
-| Из | В | Инструкция | Условие |
-|----|---|------------|---------|
-| — | ReadyForExecution | `create_vault` | Новый vault |
-| — | Active | `launch_bundle` | Атомарный запуск |
-| ReadyForExecution | Active | `proxy_buy_token` | Токены куплены |
-| Active | Active | `pay_rental` | Аренда продлена |
-| Active | Active | `redeem_tokens` (partial) | Частичный выкуп |
-| Active | Closed | `redeem_tokens` (all) | Все токены выкуплены |
-| Active | Defaulted | `mark_defaulted` | now > due + grace |
-| Defaulted | Closed | `liquidate_vault` | Токены → executor |
-| Closed | [deleted] | `close_vault` | Rent → user |
+| Статус | Описание | Кто может перевести |
+|--------|----------|---------------------|
+| `Active` | Позиция открыта, токены в vault | open_position создаёт |
+| `Closed` | Все токены проданы/выкуплены или force_close | sell_position (если all sold), redeem_tokens (если all redeemed), force_close_position |
+| `TimedOut` | Permissionless close после timeout | close_position (если !is_owner) |
 
 ---
 
 ## Ошибки
 
-```rust
-pub enum LaunchVaultError {
-    // Авторизация
-    UnauthorizedAdmin,          // Только admin
-    UnauthorizedUser,           // Только владелец vault
-    UnauthorizedExecutor,       // Только executor
-
-    // Статусы
-    InvalidVaultStatus,         // Неверный статус vault для операции
-    ProtocolPaused,             // Протокол на паузе
-
-    // Ликвидность
-    InsufficientLpLiquidity,    // Недостаточно LP в пуле
-    InsufficientAvailableLiquidity, // Недостаточно доступной ликвидности для вывода
-
-    // Выкуп
-    RedeemAmountExceedsRemaining, // Количество превышает остаток в vault
-    ZeroRedeemAmount,           // Нулевое количество для выкупа
-
-    // Покупка
-    ZeroTokenAmount,            // Нулевое количество токенов
-    BudgetExceeded,             // max_sol_cost превышает buy_budget
-
-    // Дефолт
-    GracePeriodNotExpired,      // Grace period ещё не истёк
-
-    // Валидация параметров
-    InvalidRedemptionFeeBps,    // BPS > 10000
-    InvalidRentalPeriod,        // Период <= 0
-    InvalidGracePeriod,         // Grace period < 0
-    InvalidTreasury,            // Неверный treasury account
-
-    // Общее
-    ArithmeticOverflow,         // Переполнение при вычислениях
-    VaultTokenAccountNotEmpty,  // Token account не пуст при close_vault
-
-    // Vault creation
-    ZeroLpAllocation,           // LP allocation = 0
-    ZeroUserContribution,       // User contribution = 0
-
-    // Launch bundle
-    MaxBuyersExceeded,          // Более 5 покупателей
-    BuyParamsMismatch,          // buy_amounts.len() != max_sol_costs.len()
-    NoBuyers,                   // Пустой массив покупателей
-    InvalidRemainingAccounts,   // Неверное количество remaining_accounts
-    InvalidBuyerPda,            // Buyer PDA не совпадает с ожидаемым
-
-    // Token accounts
-    InvalidVaultTokenAccount,   // Неверный vault token account (ATA derivation mismatch)
-}
-```
+| Код | Название | Описание |
+|-----|----------|----------|
+| 6000 | `UnauthorizedAdmin` | Только admin может выполнить это действие |
+| 6001 | `UnauthorizedUser` | Только владелец vault может выполнить это действие |
+| 6002 | `UnauthorizedExecutor` | Только executor может выполнить это действие |
+| 6003 | `InvalidVaultStatus` | Неверный статус vault для данной операции |
+| 6004 | `ProtocolPaused` | Протокол на паузе |
+| 6005 | `InsufficientLpLiquidity` | Недостаточно ликвидности в LP пуле |
+| 6006 | `InsufficientAvailableLiquidity` | Недостаточно доступной ликвидности для вывода |
+| 6007 | `RedeemAmountExceedsRemaining` | Сумма redeem превышает оставшиеся токены |
+| 6008 | `ZeroRedeemAmount` | Сумма redeem должна быть > 0 |
+| 6009 | `ZeroTokenAmount` | Количество токенов должно быть > 0 |
+| 6010 | `InvalidRedemptionFeeBps` | redemption_fee_bps должен быть ≤ 10000 |
+| 6011 | `InvalidTreasury` | Неверный treasury аккаунт |
+| 6012 | `ArithmeticOverflow` | Арифметическое переполнение |
+| 6013 | `VaultTokenAccountNotEmpty` | Token account vault не пустой (нужно сначала продать) |
+| 6014 | `ZeroLpAllocation` | LP allocation должен быть > 0 |
+| 6015 | `ZeroUserContribution` | User contribution должен быть > 0 |
+| 6016 | `BudgetExceeded` | Max SOL cost превышает бюджет на покупку |
+| 6017 | `MaxBuyersExceeded` | Слишком много buyer'ов (max 5) |
+| 6018 | `BuyParamsMismatch` | buy_amounts и max_sol_costs должны иметь одинаковую длину |
+| 6019 | `NoBuyers` | Нужен хотя бы один buyer |
+| 6020 | `InvalidRemainingAccounts` | Неверное количество remaining accounts |
+| 6021 | `InvalidBuyerPda` | Неверный buyer PDA |
+| 6022 | `InvalidVaultTokenAccount` | Неверный vault token account |
+| 6023 | `UtilizationCapReached` | Лимит утилизации пула будет превышен |
+| 6024 | `PositionNotTimedOut` | Позиция ещё не просрочена |
+| 6025 | `InvalidFeeBps` | Неверное значение fee BPS |
+| 6026 | `InvalidUtilizationBps` | Неверное значение utilization BPS |
+| 6027 | `InvalidPositionTimeout` | Position timeout должен быть > 0 |
+| 6028 | `ZeroDepositAmount` | Сумма депозита должна быть > 0 |
+| 6029 | `ZeroWithdrawAmount` | Сумма вывода должна быть > 0 |
+| 6030 | `InvalidLpTokenAmount` | Неверное количество LP токенов |
+| 6031 | `UnauthorizedSeller` | Только владелец vault или executor может продавать |
+| 6032 | `SlippageExceeded` | Минимальный SOL output не достигнут |
 
 ---
 
 ## События (Events)
 
 ### ProtocolInitializedEvent
-```rust
-pub struct ProtocolInitializedEvent {
-    pub admin: Pubkey,
-    pub executor: Pubkey,
-    pub treasury: Pubkey,
-    pub rental_period: i64,
-    pub rental_fee_rate: u64,
-    pub infrastructure_fee: u64,
-    pub redemption_fee_bps: u16,
-    pub grace_period: i64,
-    pub timestamp: i64,
-}
-```
 
-### ProtocolConfigUpdatedEvent
-```rust
-pub struct ProtocolConfigUpdatedEvent {
-    pub admin: Pubkey,
-    pub timestamp: i64,
-}
-```
+| Поле | Тип |
+|------|-----|
+| `admin` | `Pubkey` |
+| `executor` | `Pubkey` |
+| `treasury` | `Pubkey` |
+| `fixed_fee` | `u64` |
+| `fee_bps` | `u16` |
+| `max_utilization_bps` | `u16` |
+| `position_timeout` | `i64` |
+| `redemption_fee_bps` | `u16` |
+| `timestamp` | `i64` |
 
-### LpDepositedEvent
-```rust
-pub struct LpDepositedEvent {
-    pub authority: Pubkey,
-    pub amount: u64,
-    pub new_total_liquidity: u64,
-    pub new_available_liquidity: u64,
-    pub timestamp: i64,
-}
-```
+### PositionOpenedEvent
 
-### LpWithdrawnEvent
-```rust
-pub struct LpWithdrawnEvent {
-    pub authority: Pubkey,
-    pub amount: u64,
-    pub new_total_liquidity: u64,
-    pub new_available_liquidity: u64,
-    pub timestamp: i64,
-}
-```
+| Поле | Тип |
+|------|-----|
+| `vault` | `Pubkey` |
+| `user` | `Pubkey` |
+| `token_mint` | `Pubkey` |
+| `num_buyers` | `u8` |
+| `total_tokens` | `u64` |
+| `total_sol_spent` | `u64` |
+| `lp_allocation` | `u64` |
+| `user_contribution` | `u64` |
+| `fee_paid` | `u64` |
+| `timestamp` | `i64` |
 
-### TokenCreatedEvent
-```rust
-pub struct TokenCreatedEvent {
-    pub mint: Pubkey,
-    pub creator: Pubkey,
-    pub name: String,
-    pub symbol: String,
-    pub is_mayhem_mode: bool,
-    pub timestamp: i64,
-}
-```
+### PositionSoldEvent
 
-### VaultCreatedEvent
-```rust
-pub struct VaultCreatedEvent {
-    pub user: Pubkey,
-    pub token_mint: Pubkey,
-    pub vault: Pubkey,
-    pub lp_allocation: u64,
-    pub user_contribution: u64,
-    pub rental_due_timestamp: i64,
-    pub timestamp: i64,
-}
-```
-
-### TokenBoughtEvent
-```rust
-pub struct TokenBoughtEvent {
-    pub vault: Pubkey,
-    pub executor: Pubkey,
-    pub token_mint: Pubkey,
-    pub token_amount: u64,
-    pub sol_spent: u64,
-    pub timestamp: i64,
-}
-```
-
-### RentalPaidEvent
-```rust
-pub struct RentalPaidEvent {
-    pub vault: Pubkey,
-    pub user: Pubkey,
-    pub rental_fee: u64,
-    pub new_rental_due_timestamp: i64,
-    pub timestamp: i64,
-}
-```
+| Поле | Тип |
+|------|-----|
+| `vault` | `Pubkey` |
+| `seller` | `Pubkey` |
+| `token_mint` | `Pubkey` |
+| `tokens_sold` | `u64` |
+| `sol_received` | `u64` |
+| `sol_returned_to_pool` | `u64` |
+| `timestamp` | `i64` |
 
 ### TokensRedeemedEvent
-```rust
-pub struct TokensRedeemedEvent {
-    pub vault: Pubkey,
-    pub user: Pubkey,
-    pub token_amount: u64,
-    pub lp_returned: u64,
-    pub redemption_fee: u64,
-    pub remaining_tokens: u64,
-    pub remaining_lp: u64,
-    pub vault_closed: bool,
-    pub timestamp: i64,
-}
-```
 
-### VaultDefaultedEvent
-```rust
-pub struct VaultDefaultedEvent {
-    pub vault: Pubkey,
-    pub user: Pubkey,
-    pub token_mint: Pubkey,
-    pub remaining_tokens: u64,
-    pub remaining_lp: u64,
-    pub cranker: Pubkey,
-    pub timestamp: i64,
-}
-```
+| Поле | Тип |
+|------|-----|
+| `vault` | `Pubkey` |
+| `user` | `Pubkey` |
+| `token_amount` | `u64` |
+| `lp_returned` | `u64` |
+| `redemption_fee` | `u64` |
+| `remaining_tokens` | `u64` |
+| `remaining_lp` | `u64` |
+| `vault_closed` | `bool` |
+| `timestamp` | `i64` |
 
-### VaultLiquidatedEvent
-```rust
-pub struct VaultLiquidatedEvent {
-    pub vault: Pubkey,
-    pub executor: Pubkey,
-    pub token_mint: Pubkey,
-    pub tokens_liquidated: u64,
-    pub lp_lost: u64,
-    pub timestamp: i64,
-}
-```
+### PositionClosedEvent
 
-### VaultClosedEvent
-```rust
-pub struct VaultClosedEvent {
-    pub vault: Pubkey,
-    pub user: Pubkey,
-    pub timestamp: i64,
-}
-```
+| Поле | Тип |
+|------|-----|
+| `vault` | `Pubkey` |
+| `closer` | `Pubkey` |
+| `is_permissionless` | `bool` |
+| `close_reward` | `u64` |
+| `timestamp` | `i64` |
 
-### LaunchBundleEvent
-```rust
-pub struct LaunchBundleEvent {
-    pub vault: Pubkey,
-    pub user: Pubkey,
-    pub token_mint: Pubkey,
-    pub num_buyers: u8,
-    pub total_tokens: u64,
-    pub total_sol_spent: u64,
-    pub lp_allocation: u64,
-    pub user_contribution: u64,
-    pub timestamp: i64,
-}
-```
+### PositionForceClosedEvent
+
+| Поле | Тип |
+|------|-----|
+| `vault` | `Pubkey` |
+| `executor` | `Pubkey` |
+| `token_mint` | `Pubkey` |
+| `tokens_sold` | `u64` |
+| `sol_recovered` | `u64` |
+| `lp_loss` | `u64` |
+| `timestamp` | `i64` |
+
+### ProtocolConfigUpdatedEvent
+
+| Поле | Тип |
+|------|-----|
+| `admin` | `Pubkey` |
+| `timestamp` | `i64` |
+
+### LpDepositedEvent
+
+| Поле | Тип |
+|------|-----|
+| `depositor` | `Pubkey` |
+| `sol_amount` | `u64` |
+| `lp_tokens_minted` | `u64` |
+| `new_total_liquidity` | `u64` |
+| `lp_token_price` | `u64` |
+| `timestamp` | `i64` |
+
+### LpWithdrawnEvent
+
+| Поле | Тип |
+|------|-----|
+| `withdrawer` | `Pubkey` |
+| `lp_tokens_burned` | `u64` |
+| `sol_amount` | `u64` |
+| `new_total_liquidity` | `u64` |
+| `lp_token_price` | `u64` |
+| `timestamp` | `i64` |
+
+### TokenCreatedEvent
+
+| Поле | Тип |
+|------|-----|
+| `mint` | `Pubkey` |
+| `creator` | `Pubkey` |
+| `name` | `String` |
+| `symbol` | `String` |
+| `is_mayhem_mode` | `bool` |
+| `timestamp` | `i64` |
+
+### InsuranceFundUpdatedEvent
+
+| Поле | Тип |
+|------|-----|
+| `new_total` | `u64` |
+| `amount_added` | `u64` |
+| `timestamp` | `i64` |
 
 ---
 
 ## Структура файлов
 
 ```
-programs/launch_vault/
-├── Cargo.toml
-└── src/
-    ├── lib.rs                              # Program entry point, 13 инструкций
-    │
-    ├── state/
-    │   ├── mod.rs                          # Re-exports
-    │   ├── protocol_config.rs              # ProtocolConfig, ProtocolStatus
-    │   ├── launch_vault_state.rs           # LaunchVaultState, VaultStatus, RentalStatus
-    │   └── lp_pool.rs                      # LpPool
-    │
-    ├── instructions/
-    │   ├── mod.rs                          # Re-exports
-    │   ├── initialize_protocol.rs          # Инициализация протокола
-    │   ├── update_protocol_config.rs       # Обновление конфигурации
-    │   ├── deposit_lp.rs                   # Депозит SOL в LP пул
-    │   ├── withdraw_lp.rs                  # Вывод SOL из LP пула
-    │   ├── proxy_create_token.rs           # CPI create_v2 на Pump.fun
-    │   ├── create_vault.rs                 # Создание vault
-    │   ├── proxy_buy_token.rs              # CPI buy на Pump.fun
-    │   ├── pay_rental.rs                   # Оплата аренды
-    │   ├── redeem_tokens.rs                # Выкуп токенов
-    │   ├── mark_defaulted.rs               # Пометка дефолта
-    │   ├── liquidate_vault.rs              # Ликвидация vault
-    │   ├── close_vault.rs                  # Закрытие vault
-    │   └── launch_bundle.rs                # Атомарный запуск (create + 5 buy)
-    │
-    ├── cpi/
-    │   ├── mod.rs                          # Re-exports
-    │   ├── pump_fun.rs                     # CPI builders: create_v2, buy + константы
-    │   └── token_utils.rs                  # Token2022 CPI helpers: transfer_checked, close_account, create_ata
-    │
-    ├── errors.rs                           # LaunchVaultError (26 вариантов)
-    └── events.rs                           # 13 event structs
+launch_vault/programs/launch_vault/src/
+├── lib.rs                          # Entrypoint: declare_id!, #[program] mod, 10 instructions
+├── errors.rs                       # LaunchVaultError enum (33 варианта)
+├── events.rs                       # 11 event structs
+├── state/
+│   ├── mod.rs                      # Re-exports
+│   ├── protocol_config.rs          # ProtocolConfig + ProtocolStatus enum
+│   ├── lp_pool.rs                  # LpPool
+│   ├── launch_vault_state.rs       # LaunchVaultState + VaultStatus enum
+│   └── insurance_fund.rs           # InsuranceFund
+├── instructions/
+│   ├── mod.rs                      # Re-exports
+│   ├── initialize_protocol.rs      # InitializeProtocol accounts + handler
+│   ├── update_protocol_config.rs   # UpdateProtocolConfig accounts + handler
+│   ├── deposit_lp.rs               # DepositLp accounts + handler
+│   ├── withdraw_lp.rs              # WithdrawLp accounts + handler
+│   ├── proxy_create_token.rs       # ProxyCreateToken accounts + handler
+│   ├── open_position.rs            # OpenPosition accounts + handler (630 lines)
+│   ├── sell_position.rs            # SellPosition accounts + handler
+│   ├── redeem_tokens.rs            # RedeemTokens accounts + handler
+│   ├── close_position.rs           # ClosePosition accounts + handler
+│   └── force_close_position.rs     # ForceClosePosition accounts + handler
+└── cpi/
+    ├── mod.rs                      # Re-exports
+    ├── pump_fun.rs                 # Pump.fun CPI builders (create_v2, buy, sell) + PDA derivation
+    └── token_utils.rs              # Token2022 instruction builders + read_token_account_amount
 ```
-
----
-
-## Devnet Deployment
-
-| Компонент | Адрес |
-|----------|-------|
-| Program | `2hpb3dPckVbTf81WoeYt2BybcUZQCevxi1N5DwjaRsL7` |
-| Admin / Executor / Treasury | `66HBrTxNii7eFzSTgo8mUzsij3FM7xC2L9jE2H89sDYs` |
-| ProtocolConfig PDA | `4Zjh2HcUSCSaqqTt7xT4hr28A8Wmz4eXXJ2hqWuVRWwM` |
-| LP Pool PDA | `HbDnSjsk5WZSpmGTRNkTmpS2gFryWZ6nva4jte9am4aM` |
-| Address Lookup Table | `G7Aqezkcab2GJtphbNCi8HUG2hfW6ZQman3GT9UgjP6M` |
-
-### Текущие параметры (devnet)
-
-```
-rental_period:      86400s (24ч)
-rental_fee_rate:    100,000 lamports (0.0001 SOL)
-infrastructure_fee: 50,000 lamports (0.00005 SOL)
-redemption_fee_bps: 250 (2.5%)
-grace_period:       3600s (1ч)
-```
-
----
-
-## CLI
-
-```bash
-# Управление протоколом
-yarn cli init                                     # Инициализация
-yarn cli deposit-lp --amount 5                    # Депозит SOL
-yarn cli withdraw-lp --amount 1                   # Вывод SOL
-yarn cli status                                   # Статус протокола
-
-# Загрузка метаданных токена
-yarn cli upload-metadata \
-  --name "MimiCat" --symbol "MIMI" \
-  --description "Community meme token" \
-  --image "https://example.com/logo.png" \
-  --twitter "https://x.com/..." \
-  --telegram "https://t.me/..."
-
-# Пошаговый запуск
-yarn cli create-token --name "Token" --symbol "TKN" --uri <URI>
-yarn cli create-vault --mint <PUBKEY> --lp-allocation 0.5 --user-contribution 0.3
-yarn cli proxy-buy --mint <PUBKEY> --amount 1000000 --max-sol-cost 0.5
-
-# Атомарный запуск (всё в одной TX)
-yarn cli launch-bundle \
-  --name "Token" --symbol "TKN" --uri <URI> \
-  --lp-allocation 0.5 --user-contribution 0.3 \
-  --buy-amounts 1000000 --max-sol-costs 0.5
-
-# Глобальные опции
-#   --keypair <PATH>      (default: ~/solana-wallet.json)
-#   --cluster <CLUSTER>   (devnet | mainnet-beta, default: devnet)
-#   --rpc <URL>           (custom RPC)
-#   --priority-fee <NUM>  (microLamports, default: 50000)
-```
-
----
-
-## Успешные тесты (devnet)
-
-| Тест | TX | Токен |
-|------|-----|-------|
-| launch_bundle (1 buyer) | `61nkJDGanFMA...` | `41ZNEY...` |
-| launch_bundle (MimiCat) | `uaZn2FD9Un1n...` | `6R1oEJ...` |

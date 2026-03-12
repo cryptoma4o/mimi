@@ -31,3 +31,5 @@ export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(
 
 export const DEFAULT_PRIORITY_FEE = 50_000; // microLamports
 export const DEFAULT_COMPUTE_UNITS = 400_000;
+
+export const METADATA_API_URL = process.env.NEXT_PUBLIC_METADATA_API_URL ?? "";

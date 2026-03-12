@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
 
 use crate::cpi::pump_fun;
+use crate::cpi::token_utils::TOKEN_2022_PROGRAM_ID;
 use crate::errors::LaunchVaultError;
 use crate::events::PositionForceClosedEvent;
 use crate::state::*;
@@ -37,10 +38,12 @@ pub struct ForceClosePosition<'info> {
     /// CHECK: Vault token account (ATA derived with Token2022)
     #[account(
         mut,
+        // Token2022 for ATA derivation — Pump.fun v2 tokens are Token2022,
+        // but Pump.fun sell CPI expects old SPL Token program in token_program position.
         constraint = vault_token_account.key() == anchor_spl::associated_token::get_associated_token_address_with_program_id(
             &vault_state.key(),
             &vault_state.token_mint,
-            &pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"),
+            &TOKEN_2022_PROGRAM_ID,
         ) @ LaunchVaultError::InvalidVaultTokenAccount,
     )]
     pub vault_token_account: UncheckedAccount<'info>,

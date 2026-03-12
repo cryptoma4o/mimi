@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
 
-use crate::cpi::token_utils::build_close_account_instruction;
+use crate::cpi::token_utils::{build_close_account_instruction, TOKEN_2022_PROGRAM_ID};
 use crate::state::*;
 use crate::errors::LaunchVaultError;
 use crate::events::PositionClosedEvent;
@@ -45,12 +45,15 @@ pub struct ClosePosition<'info> {
         constraint = vault_token_account.key() == anchor_spl::associated_token::get_associated_token_address_with_program_id(
             &vault_state.key(),
             &vault_state.token_mint,
-            &token_program.key(),
+            &TOKEN_2022_PROGRAM_ID,
         ) @ LaunchVaultError::InvalidVaultTokenAccount,
     )]
     pub vault_token_account: UncheckedAccount<'info>,
 
-    /// CHECK: Token2022 program
+    /// CHECK: Token2022 program — must be Token2022 for consistency with ATA derivation
+    #[account(
+        constraint = token_program.key() == TOKEN_2022_PROGRAM_ID @ LaunchVaultError::InvalidVaultTokenAccount,
+    )]
     pub token_program: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,

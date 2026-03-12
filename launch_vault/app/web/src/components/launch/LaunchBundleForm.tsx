@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { BN } from "@coral-xyz/anchor";
-import { LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { useProgram } from "@/hooks/useProgram";
 import { useProtocolConfig } from "@/hooks/useProtocolConfig";
@@ -10,7 +10,11 @@ import { useLpPool } from "@/hooks/useLpPool";
 import { buildOpenPosition } from "@/lib/transactions";
 import { explorerUrl, explorerAccountUrl } from "@/lib/format";
 import { parseAnchorError } from "@/lib/errors";
+import { METADATA_API_URL } from "@/lib/constants";
+import { createOpenPositionALT } from "@/lib/alt";
 import toast from "react-hot-toast";
+
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
 
 type Step = 1 | 2 | 3 | 4;
 
@@ -34,7 +38,13 @@ export function LaunchBundleForm() {
   const [name, setName] = useState("");
   const [symbol, setSymbol] = useState("");
   const [uri, setUri] = useState("");
+  const [description, setDescription] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [creatingMetadata, setCreatingMetadata] = useState(false);
+  const [metadataMode, setMetadataMode] = useState<"create" | "manual">("create");
   const [isMayhem, setIsMayhem] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Step 2: Position config
   const [lpAllocation, setLpAllocation] = useState("");
@@ -74,19 +84,123 @@ export function LaunchBundleForm() {
   const totalMaxSol = buyers.reduce((sum, b) => sum + (parseFloat(b.maxSolCost) || 0), 0);
   const availableLp = pool ? Number((pool as any).availableLiquidity) / LAMPORTS_PER_SOL : 0;
 
+  // Cleanup Object URL on unmount or when preview changes
+  const prevPreviewRef = useRef<string | null>(null);
+  useEffect(() => {
+    // Revoke the previous preview URL when imagePreview changes
+    if (prevPreviewRef.current && prevPreviewRef.current !== imagePreview) {
+      URL.revokeObjectURL(prevPreviewRef.current);
+    }
+    prevPreviewRef.current = imagePreview;
+    return () => {
+      if (imagePreview) URL.revokeObjectURL(imagePreview);
+    };
+  }, [imagePreview]);
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    if (file && file.size > MAX_IMAGE_SIZE) {
+      toast.error("Image must be under 5MB");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+    if (file && !file.type.startsWith("image/")) {
+      toast.error("Only image files are allowed");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+    setImageFile(file);
+    // Don't revoke here — useEffect handles cleanup of previous URL
+    setImagePreview(file ? URL.createObjectURL(file) : null);
+  };
+
+  const handleCreateMetadata = async () => {
+    if (!name || !symbol) return;
+    if (!METADATA_API_URL) {
+      toast.error("Metadata API not configured (set NEXT_PUBLIC_METADATA_API_URL)");
+      return;
+    }
+    setCreatingMetadata(true);
+    try {
+      const fd = new FormData();
+      fd.append("name", name);
+      fd.append("symbol", symbol);
+      fd.append("description", description);
+      if (imageFile) fd.append("image", imageFile);
+      const res = await fetch(METADATA_API_URL, { method: "POST", body: fd });
+      if (!res.ok) {
+        const text = await res.text();
+        toast.error(`Metadata error (${res.status}): ${text.slice(0, 200)}`);
+        return;
+      }
+      const data = await res.json();
+      if (data.uri) {
+        setUri(data.uri);
+        toast.success("Metadata created!");
+      } else {
+        toast.error(data.error || "Failed to create metadata");
+      }
+    } catch (err: any) {
+      toast.error("Metadata service error: " + err.message);
+    } finally {
+      setCreatingMetadata(false);
+    }
+  };
+
   const canProceed1 = name && symbol && uri;
   const canProceed2 = lpSol > 0;
   const canProceed3 = buyers.every(b => (parseInt(b.tokenAmount) || 0) > 0 && (parseFloat(b.maxSolCost) || 0) > 0);
 
+  // ALT address from localStorage, scoped to RPC endpoint
+  const [altAddress, setAltAddress] = useState<PublicKey | null>(null);
+  const { sendTransaction, signTransaction } = useWallet();
+
+  const altStorageKey = `mimi_alt_address_${connection.rpcEndpoint}_${publicKey?.toBase58() ?? "none"}`;
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem(altStorageKey);
+      if (stored) {
+        try { setAltAddress(new PublicKey(stored)); } catch {}
+      }
+    }
+  }, [altStorageKey]);
+
+  const handleCreateALT = async () => {
+    if (!publicKey || !sendTransaction) return;
+    setLoading(true);
+    try {
+      toast("Creating Address Lookup Table...");
+      const alt = await createOpenPositionALT(
+        connection,
+        publicKey,
+        async (vtx) => {
+          const sig = await sendTransaction(vtx, connection);
+          return sig;
+        },
+        undefined,
+        altAddress || undefined
+      );
+      localStorage.setItem(altStorageKey, alt.toBase58());
+      setAltAddress(alt);
+      toast.success("ALT created! Wait a few seconds before launching.");
+    } catch (err: any) {
+      toast.error("ALT creation failed: " + err.message);
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleLaunch = async () => {
-    if (!program || !publicKey) return;
+    if (!program || !publicKey || !signTransaction) return;
 
     setLoading(true);
     try {
       const buyAmounts = buyers.map(b => new BN(parseInt(b.tokenAmount)));
       const maxSolCosts = buyers.map(b => new BN(Math.round(parseFloat(b.maxSolCost) * LAMPORTS_PER_SOL)));
 
-      const { tx, mint, vaultPDA } = await buildOpenPosition(
+      const { vtx, mint, vaultPDA, blockhash, lastValidBlockHeight } = await buildOpenPosition(
         program,
         connection,
         publicKey,
@@ -99,7 +213,16 @@ export function LaunchBundleForm() {
           userContributionSol: contribSol,
           buyAmounts,
           maxSolCosts,
+          altAddress: altAddress || undefined,
         }
+      );
+
+      // Wallet signs the versioned transaction (mintKeypair already signed)
+      const signed = await signTransaction(vtx);
+      const tx = await connection.sendRawTransaction(signed.serialize());
+      await connection.confirmTransaction(
+        { signature: tx, blockhash, lastValidBlockHeight },
+        "confirmed"
       );
 
       setResult({ tx, mint: mint.toBase58(), vault: vaultPDA.toBase58() });
@@ -166,7 +289,7 @@ export function LaunchBundleForm() {
         ))}
       </div>
 
-      {/* Step 1: Token Info */}
+      {/* Step 1: Token Info + Metadata */}
       {step === 1 && (
         <div className="space-y-4">
           <h2 className="text-white font-semibold text-lg">Step 1: Token Info</h2>
@@ -182,12 +305,67 @@ export function LaunchBundleForm() {
               placeholder="e.g. MIMI"
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500" />
           </div>
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Metadata URI</label>
-            <input type="text" value={uri} onChange={(e) => setUri(e.target.value)}
-              placeholder="https://..."
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500" />
+
+          {/* Metadata mode toggle */}
+          <div className="flex gap-2 bg-gray-800/50 rounded-lg p-1">
+            <button
+              onClick={() => setMetadataMode("create")}
+              className={`flex-1 py-1.5 text-sm rounded-md transition ${
+                metadataMode === "create" ? "bg-violet-600 text-white" : "text-gray-400 hover:text-gray-300"
+              }`}
+            >
+              Create Metadata
+            </button>
+            <button
+              onClick={() => setMetadataMode("manual")}
+              className={`flex-1 py-1.5 text-sm rounded-md transition ${
+                metadataMode === "manual" ? "bg-violet-600 text-white" : "text-gray-400 hover:text-gray-300"
+              }`}
+            >
+              Paste URI
+            </button>
           </div>
+
+          {metadataMode === "create" ? (
+            <div className="space-y-3 bg-gray-800/30 border border-gray-700 rounded-lg p-4">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Description</label>
+                <textarea value={description} onChange={(e) => setDescription(e.target.value)}
+                  placeholder="A cool meme token..."
+                  rows={2}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500 resize-none" />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Image (max 5MB)</label>
+                <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageChange}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-violet-600 file:text-white file:cursor-pointer" />
+                {imagePreview && (
+                  <img src={imagePreview} alt="Preview" className="mt-2 w-20 h-20 rounded-lg object-cover" />
+                )}
+              </div>
+              <button
+                onClick={handleCreateMetadata}
+                disabled={!name || !symbol || creatingMetadata}
+                className="w-full bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white font-medium py-2 rounded-lg transition text-sm"
+              >
+                {creatingMetadata ? "Creating..." : uri ? "Recreate Metadata" : "Create Metadata"}
+              </button>
+              {uri && (
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-green-400">URI ready</span>
+                  <span className="text-gray-500 truncate flex-1">{uri}</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Metadata URI</label>
+              <input type="text" value={uri} onChange={(e) => setUri(e.target.value)}
+                placeholder="https://..."
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500" />
+            </div>
+          )}
+
           <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
             <input type="checkbox" checked={isMayhem} onChange={(e) => setIsMayhem(e.target.checked)}
               className="rounded bg-gray-800 border-gray-600" />
@@ -319,9 +497,21 @@ export function LaunchBundleForm() {
               </p>
             ))}
           </div>
+          {!altAddress && (
+            <div className="bg-yellow-900/20 border border-yellow-800 rounded-lg p-3 text-sm">
+              <p className="text-yellow-400 mb-2">Address Lookup Table required (one-time setup)</p>
+              <button onClick={handleCreateALT} disabled={loading}
+                className="bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 text-white font-medium py-2 px-4 rounded-lg transition text-sm">
+                {loading ? "Creating..." : "Create ALT"}
+              </button>
+            </div>
+          )}
+          {altAddress && (
+            <p className="text-xs text-green-400">ALT: {altAddress.toBase58().slice(0, 16)}...</p>
+          )}
           <div className="flex gap-2">
             <button onClick={() => setStep(3)} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2.5 rounded-lg transition">Back</button>
-            <button onClick={handleLaunch} disabled={loading || !publicKey}
+            <button onClick={handleLaunch} disabled={loading || !publicKey || !altAddress}
               className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-medium py-2.5 rounded-lg transition">
               {loading ? "Opening..." : "Open Position"}
             </button>
