@@ -128,6 +128,90 @@ export type LaunchVault = {
       "args": []
     },
     {
+      "name": "depositInsuranceFund",
+      "discriminator": [
+        237,
+        0,
+        91,
+        28,
+        87,
+        48,
+        239,
+        248
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "insuranceFund",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  110,
+                  115,
+                  117,
+                  114,
+                  97,
+                  110,
+                  99,
+                  101,
+                  95,
+                  102,
+                  117,
+                  110,
+                  100
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "protocolConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  116,
+                  111,
+                  99,
+                  111,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "depositLp",
       "discriminator": [
         83,
@@ -144,6 +228,33 @@ export type LaunchVault = {
           "name": "depositor",
           "writable": true,
           "signer": true
+        },
+        {
+          "name": "protocolConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  116,
+                  111,
+                  99,
+                  111,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "lpPool",
@@ -481,6 +592,63 @@ export type LaunchVault = {
         {
           "name": "redemptionFeeBps",
           "type": "u16"
+        },
+        {
+          "name": "minUserContribution",
+          "type": "u64"
+        },
+        {
+          "name": "maxLpPerPosition",
+          "type": "u64"
+        },
+        {
+          "name": "minUserRatioBps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "migrateProtocol",
+      "docs": [
+        "One-time migration: realloc ProtocolConfig and remap data layout"
+      ],
+      "discriminator": [
+        182,
+        254,
+        253,
+        220,
+        0,
+        144,
+        234,
+        250
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "protocolConfig",
+          "writable": true
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "minUserContribution",
+          "type": "u64"
+        },
+        {
+          "name": "maxLpPerPosition",
+          "type": "u64"
+        },
+        {
+          "name": "minUserRatioBps",
+          "type": "u16"
         }
       ]
     },
@@ -513,6 +681,7 @@ export type LaunchVault = {
         },
         {
           "name": "protocolConfig",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -701,6 +870,64 @@ export type LaunchVault = {
           "type": {
             "vec": "u64"
           }
+        },
+        {
+          "name": "stopLossBps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "pauseProtocol",
+      "discriminator": [
+        144,
+        95,
+        0,
+        107,
+        119,
+        39,
+        248,
+        141
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "protocolConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  116,
+                  111,
+                  99,
+                  111,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "reason",
+          "type": "string"
         }
       ]
     },
@@ -930,6 +1157,54 @@ export type LaunchVault = {
       ]
     },
     {
+      "name": "resumeProtocol",
+      "discriminator": [
+        62,
+        91,
+        76,
+        18,
+        174,
+        87,
+        87,
+        208
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "protocolConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  116,
+                  111,
+                  99,
+                  111,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "sellPosition",
       "discriminator": [
         11,
@@ -1087,6 +1362,164 @@ export type LaunchVault = {
       ]
     },
     {
+      "name": "triggerStopLoss",
+      "discriminator": [
+        17,
+        202,
+        42,
+        253,
+        27,
+        138,
+        151,
+        12
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault.user",
+                "account": "launchVaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault.token_mint",
+                "account": "launchVaultState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "protocolConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  116,
+                  111,
+                  99,
+                  111,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "lpPool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "tokenMint"
+        },
+        {
+          "name": "pumpProgram"
+        },
+        {
+          "name": "pumpGlobal",
+          "writable": true
+        },
+        {
+          "name": "pumpBondingCurve",
+          "writable": true
+        },
+        {
+          "name": "pumpAssociatedBondingCurve",
+          "writable": true
+        },
+        {
+          "name": "pumpEventAuthority"
+        },
+        {
+          "name": "pumpFeeRecipient",
+          "writable": true
+        },
+        {
+          "name": "pumpCreatorVault",
+          "writable": true
+        },
+        {
+          "name": "pumpFeeConfig"
+        },
+        {
+          "name": "pumpFeeProgram"
+        },
+        {
+          "name": "pumpBondingCurveV2"
+        },
+        {
+          "name": "tokenProgram"
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "associatedTokenProgram",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "vaultTokenAccount",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "minSolOutput",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "updateProtocolConfig",
       "discriminator": [
         197,
@@ -1194,14 +1627,116 @@ export type LaunchVault = {
           }
         },
         {
-          "name": "newStatus",
+          "name": "newCbPositionLimit",
           "type": {
-            "option": {
-              "defined": {
-                "name": "protocolStatus"
-              }
-            }
+            "option": "u32"
           }
+        },
+        {
+          "name": "newCbWindowSeconds",
+          "type": {
+            "option": "i64"
+          }
+        },
+        {
+          "name": "newCbCooldownSeconds",
+          "type": {
+            "option": "i64"
+          }
+        },
+        {
+          "name": "newMinInsuranceFund",
+          "type": {
+            "option": "u64"
+          }
+        }
+      ]
+    },
+    {
+      "name": "withdrawInsuranceFund",
+      "discriminator": [
+        228,
+        196,
+        230,
+        109,
+        1,
+        95,
+        171,
+        196
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "insuranceFund",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  110,
+                  115,
+                  117,
+                  114,
+                  97,
+                  110,
+                  99,
+                  101,
+                  95,
+                  102,
+                  117,
+                  110,
+                  100
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "protocolConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  116,
+                  111,
+                  99,
+                  111,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "destination",
+          "writable": true
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
         }
       ]
     },
@@ -1323,6 +1858,32 @@ export type LaunchVault = {
   ],
   "events": [
     {
+      "name": "circuitBreakerTriggeredEvent",
+      "discriminator": [
+        234,
+        166,
+        210,
+        126,
+        160,
+        249,
+        123,
+        142
+      ]
+    },
+    {
+      "name": "insuranceFundDepositedEvent",
+      "discriminator": [
+        196,
+        168,
+        185,
+        93,
+        67,
+        181,
+        201,
+        129
+      ]
+    },
+    {
       "name": "insuranceFundUpdatedEvent",
       "discriminator": [
         200,
@@ -1333,6 +1894,19 @@ export type LaunchVault = {
         104,
         63,
         38
+      ]
+    },
+    {
+      "name": "insuranceFundWithdrawnEvent",
+      "discriminator": [
+        180,
+        75,
+        105,
+        109,
+        131,
+        33,
+        211,
+        100
       ]
     },
     {
@@ -1437,6 +2011,45 @@ export type LaunchVault = {
         191,
         125,
         73
+      ]
+    },
+    {
+      "name": "protocolPausedEvent",
+      "discriminator": [
+        0,
+        32,
+        186,
+        132,
+        252,
+        198,
+        0,
+        66
+      ]
+    },
+    {
+      "name": "protocolResumedEvent",
+      "discriminator": [
+        213,
+        125,
+        245,
+        148,
+        202,
+        50,
+        203,
+        63
+      ]
+    },
+    {
+      "name": "stopLossTriggeredEvent",
+      "discriminator": [
+        70,
+        113,
+        65,
+        104,
+        72,
+        7,
+        217,
+        219
       ]
     },
     {
@@ -1631,9 +2244,119 @@ export type LaunchVault = {
       "code": 6032,
       "name": "slippageExceeded",
       "msg": "Minimum SOL output not met"
+    },
+    {
+      "code": 6033,
+      "name": "userContributionTooLow",
+      "msg": "User contribution below minimum required"
+    },
+    {
+      "code": 6034,
+      "name": "lpAllocationTooHigh",
+      "msg": "LP allocation exceeds maximum allowed"
+    },
+    {
+      "code": 6035,
+      "name": "insufficientUserRatio",
+      "msg": "User contribution ratio below minimum required"
+    },
+    {
+      "code": 6036,
+      "name": "stopLossNotConfigured",
+      "msg": "Stop-loss not configured for this position"
+    },
+    {
+      "code": 6037,
+      "name": "stopLossAlreadyTriggered",
+      "msg": "Stop-loss already triggered"
+    },
+    {
+      "code": 6038,
+      "name": "stopLossConditionNotMet",
+      "msg": "Stop-loss condition not met (price above threshold)"
+    },
+    {
+      "code": 6039,
+      "name": "circuitBreakerTriggered",
+      "msg": "Circuit breaker triggered — too many positions or cooldown active"
+    },
+    {
+      "code": 6040,
+      "name": "insuranceFundBelowMinimum",
+      "msg": "Insurance fund withdrawal would exceed minimum balance"
+    },
+    {
+      "code": 6041,
+      "name": "invalidInsuranceFundAuthority",
+      "msg": "Invalid insurance fund authority"
+    },
+    {
+      "code": 6042,
+      "name": "zeroInsuranceFundAmount",
+      "msg": "Insurance fund amount must be greater than zero"
+    },
+    {
+      "code": 6043,
+      "name": "circuitBreakerInCooldown",
+      "msg": "Cannot resume protocol — circuit breaker still in cooldown"
+    },
+    {
+      "code": 6044,
+      "name": "unauthorizedPauser",
+      "msg": "Only admin or executor can pause protocol"
+    },
+    {
+      "code": 6045,
+      "name": "invalidCircuitBreakerParam",
+      "msg": "Invalid circuit breaker parameter"
+    },
+    {
+      "code": 6046,
+      "name": "invalidStopLossParam",
+      "msg": "Stop-loss basis points must be 0 or less than 10000"
+    },
+    {
+      "code": 6047,
+      "name": "protocolNotPaused",
+      "msg": "Protocol is not paused"
+    },
+    {
+      "code": 6048,
+      "name": "invalidPumpFeeProgram",
+      "msg": "Invalid PumpFun fee program"
+    },
+    {
+      "code": 6049,
+      "name": "invalidBondingCurveData",
+      "msg": "Invalid bonding curve account data"
+    },
+    {
+      "code": 6050,
+      "name": "invalidTokenProgram",
+      "msg": "Invalid token program — expected Token2022"
     }
   ],
   "types": [
+    {
+      "name": "circuitBreakerTriggeredEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "positionsInWindow",
+            "type": "u32"
+          },
+          {
+            "name": "windowLimit",
+            "type": "u32"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
     {
       "name": "insuranceFund",
       "type": {
@@ -1661,6 +2384,26 @@ export type LaunchVault = {
       }
     },
     {
+      "name": "insuranceFundDepositedEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "newTotal",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
       "name": "insuranceFundUpdatedEvent",
       "type": {
         "kind": "struct",
@@ -1672,6 +2415,30 @@ export type LaunchVault = {
           {
             "name": "amountAdded",
             "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "insuranceFundWithdrawnEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "newTotal",
+            "type": "u64"
+          },
+          {
+            "name": "destination",
+            "type": "pubkey"
           },
           {
             "name": "timestamp",
@@ -1756,6 +2523,34 @@ export type LaunchVault = {
               "Number of PDA sub-wallets used for buying"
             ],
             "type": "u8"
+          },
+          {
+            "name": "entryPrice",
+            "docs": [
+              "Price at which position was opened (lamports per 1M tokens)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "stopLossBps",
+            "docs": [
+              "Stop-loss threshold in basis points (0 = disabled)"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "stopLossTriggered",
+            "docs": [
+              "Whether stop-loss has been triggered"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "stopLossTimestamp",
+            "docs": [
+              "Timestamp when stop-loss was triggered"
+            ],
+            "type": "i64"
           },
           {
             "name": "bump",
@@ -2089,7 +2884,7 @@ export type LaunchVault = {
           {
             "name": "closeRewardBps",
             "docs": [
-              "Reward for permissionless closer (basis points of returned LP)"
+              "Reward for permissionless closer (basis points of remaining LP allocation)"
             ],
             "type": "u16"
           },
@@ -2108,12 +2903,82 @@ export type LaunchVault = {
             "type": "u16"
           },
           {
+            "name": "minUserContribution",
+            "docs": [
+              "Minimum user contribution per position in lamports"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "maxLpPerPosition",
+            "docs": [
+              "Maximum LP allocation per position in lamports"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "minUserRatioBps",
+            "docs": [
+              "Minimum ratio of user_contribution to lp_allocation in basis points (e.g., 2000 = 20%)"
+            ],
+            "type": "u16"
+          },
+          {
             "name": "status",
             "type": {
               "defined": {
                 "name": "protocolStatus"
               }
             }
+          },
+          {
+            "name": "cbPositionLimit",
+            "docs": [
+              "Circuit breaker: max positions per window"
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "cbWindowSeconds",
+            "docs": [
+              "Circuit breaker: window duration in seconds"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "cbCooldownSeconds",
+            "docs": [
+              "Circuit breaker: cooldown after trigger in seconds"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "cbWindowStart",
+            "docs": [
+              "Circuit breaker: current window start timestamp"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "cbPositionsInWindow",
+            "docs": [
+              "Circuit breaker: positions opened in current window"
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "cbLastTrigger",
+            "docs": [
+              "Circuit breaker: last trigger timestamp"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "minInsuranceFund",
+            "docs": [
+              "Minimum insurance fund required (guard for withdrawals)"
+            ],
+            "type": "u64"
           },
           {
             "name": "bump",
@@ -2183,6 +3048,42 @@ export type LaunchVault = {
       }
     },
     {
+      "name": "protocolPausedEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pauser",
+            "type": "pubkey"
+          },
+          {
+            "name": "reason",
+            "type": "string"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "protocolResumedEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "resumer",
+            "type": "pubkey"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
       "name": "protocolStatus",
       "type": {
         "kind": "enum",
@@ -2192,6 +3093,42 @@ export type LaunchVault = {
           },
           {
             "name": "paused"
+          }
+        ]
+      }
+    },
+    {
+      "name": "stopLossTriggeredEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "tokenMint",
+            "type": "pubkey"
+          },
+          {
+            "name": "entryPrice",
+            "type": "u64"
+          },
+          {
+            "name": "triggerPrice",
+            "type": "u64"
+          },
+          {
+            "name": "tokensSold",
+            "type": "u64"
+          },
+          {
+            "name": "solReceived",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
           }
         ]
       }

@@ -3,9 +3,9 @@ use anchor_lang::solana_program::program::invoke_signed;
 use anchor_lang::solana_program::system_instruction;
 
 use crate::cpi::token_utils::build_initialize_mint2_instruction;
-use crate::state::*;
 use crate::errors::LaunchVaultError;
 use crate::events::ProtocolInitializedEvent;
+use crate::state::*;
 
 /// Token2022 program ID
 const TOKEN_2022_PROGRAM_ID: Pubkey = pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
@@ -68,20 +68,41 @@ pub fn handler(
     close_reward_bps: u16,
     insurance_split_bps: u16,
     redemption_fee_bps: u16,
+    min_user_contribution: u64,
+    max_lp_per_position: u64,
+    min_user_ratio_bps: u16,
 ) -> Result<()> {
     require!(fee_bps <= 10_000, LaunchVaultError::InvalidFeeBps);
-    require!(max_utilization_bps > 0 && max_utilization_bps <= 10_000, LaunchVaultError::InvalidUtilizationBps);
-    require!(position_timeout > 0, LaunchVaultError::InvalidPositionTimeout);
+    require!(
+        max_utilization_bps > 0 && max_utilization_bps <= 10_000,
+        LaunchVaultError::InvalidUtilizationBps
+    );
+    require!(
+        position_timeout >= 300,
+        LaunchVaultError::InvalidPositionTimeout
+    );
     require!(close_reward_bps <= 10_000, LaunchVaultError::InvalidFeeBps);
-    require!(insurance_split_bps <= 10_000, LaunchVaultError::InvalidFeeBps);
-    require!(redemption_fee_bps <= 10_000, LaunchVaultError::InvalidRedemptionFeeBps);
+    require!(
+        insurance_split_bps <= 10_000,
+        LaunchVaultError::InvalidFeeBps
+    );
+    require!(
+        redemption_fee_bps <= 10_000,
+        LaunchVaultError::InvalidRedemptionFeeBps
+    );
+    require!(min_user_ratio_bps <= 10_000, LaunchVaultError::InvalidFeeBps);
+    require!(
+        max_lp_per_position > 0,
+        LaunchVaultError::InvalidCircuitBreakerParam
+    );
+    require!(
+        min_user_contribution > 0,
+        LaunchVaultError::UserContributionTooLow
+    );
 
     // === Create LP mint PDA via Token2022 ===
     let program_id = ctx.program_id;
-    let (lp_mint_pda, lp_mint_bump) = Pubkey::find_program_address(
-        &[b"lp_mint"],
-        program_id,
-    );
+    let (lp_mint_pda, lp_mint_bump) = Pubkey::find_program_address(&[b"lp_mint"], program_id);
     require!(
         ctx.accounts.lp_mint.key() == lp_mint_pda,
         LaunchVaultError::InvalidVaultStatus // reuse for PDA mismatch
@@ -113,16 +134,14 @@ pub fn handler(
     let init_mint_ix = build_initialize_mint2_instruction(
         &TOKEN_2022_PROGRAM_ID,
         &lp_mint_pda,
-        9, // decimals (match SOL)
+        9,            // decimals (match SOL)
         &lp_mint_pda, // mint authority = PDA
-        None, // no freeze authority
+        None,         // no freeze authority
     );
 
     invoke_signed(
         &init_mint_ix,
-        &[
-            ctx.accounts.lp_mint.to_account_info(),
-        ],
+        &[ctx.accounts.lp_mint.to_account_info()],
         &[lp_mint_seeds],
     )?;
 
@@ -138,7 +157,17 @@ pub fn handler(
     config.close_reward_bps = close_reward_bps;
     config.insurance_split_bps = insurance_split_bps;
     config.redemption_fee_bps = redemption_fee_bps;
+    config.min_user_contribution = min_user_contribution;
+    config.max_lp_per_position = max_lp_per_position;
+    config.min_user_ratio_bps = min_user_ratio_bps;
     config.status = ProtocolStatus::Active;
+    config.cb_position_limit = 0;
+    config.cb_window_seconds = 86400;
+    config.cb_cooldown_seconds = 3600;
+    config.cb_window_start = 0;
+    config.cb_positions_in_window = 0;
+    config.cb_last_trigger = 0;
+    config.min_insurance_fund = 0;
     config.bump = ctx.bumps.protocol_config;
 
     // === Set LP pool ===

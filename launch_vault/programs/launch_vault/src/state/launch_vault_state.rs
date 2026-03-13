@@ -29,5 +29,13 @@ pub struct LaunchVaultState {
     pub fee_paid: u64,
     /// Number of PDA sub-wallets used for buying
     pub num_sub_wallets: u8,
+    /// Price at which position was opened (lamports per 1M tokens)
+    pub entry_price: u64,
+    /// Stop-loss threshold in basis points (0 = disabled)
+    pub stop_loss_bps: u16,
+    /// Whether stop-loss has been triggered
+    pub stop_loss_triggered: bool,
+    /// Timestamp when stop-loss was triggered
+    pub stop_loss_timestamp: i64,
     pub bump: u8,
 }

@@ -99,6 +99,9 @@ pub struct SellPosition<'info> {
     pub system_program: Program<'info, System>,
 
     /// CHECK: Token2022 program
+    #[account(
+        constraint = token_program.key() == crate::cpi::token_utils::TOKEN_2022_PROGRAM_ID @ LaunchVaultError::InvalidTokenProgram,
+    )]
     pub token_program: UncheckedAccount<'info>,
 }
 
@@ -112,12 +115,7 @@ pub fn handler(ctx: Context<SellPosition>, amount: u64, min_sol_output: u64) -> 
     let user_key = ctx.accounts.vault_state.user;
     let mint_key = ctx.accounts.vault_state.token_mint;
     let bump = ctx.accounts.vault_state.bump;
-    let vault_seeds: &[&[u8]] = &[
-        b"vault",
-        user_key.as_ref(),
-        mint_key.as_ref(),
-        &[bump],
-    ];
+    let vault_seeds: &[&[u8]] = &[b"vault", user_key.as_ref(), mint_key.as_ref(), &[bump]];
 
     // Record vault lamports before sell to calculate SOL received
     let vault_lamports_before = ctx.accounts.vault_state.to_account_info().lamports();
@@ -173,10 +171,12 @@ pub fn handler(ctx: Context<SellPosition>, amount: u64, min_sol_output: u64) -> 
     let sol_received = vault_lamports_after.saturating_sub(vault_lamports_before);
 
     // Read actual remaining tokens to verify sell
-    let remaining_tokens = read_token_account_amount(
-        &ctx.accounts.vault_token_account.to_account_info(),
-    )?;
-    let tokens_sold = ctx.accounts.vault_state.remaining_token_amount
+    let remaining_tokens =
+        read_token_account_amount(&ctx.accounts.vault_token_account.to_account_info())?;
+    let tokens_sold = ctx
+        .accounts
+        .vault_state
+        .remaining_token_amount
         .checked_sub(remaining_tokens)
         .ok_or(LaunchVaultError::ArithmeticOverflow)?;
 
@@ -194,8 +194,16 @@ pub fn handler(ctx: Context<SellPosition>, amount: u64, min_sol_output: u64) -> 
     let pool_recovery = sol_received.min(proportional_lp);
 
     if pool_recovery > 0 {
-        **ctx.accounts.vault_state.to_account_info().try_borrow_mut_lamports()? -= pool_recovery;
-        **ctx.accounts.lp_pool.to_account_info().try_borrow_mut_lamports()? += pool_recovery;
+        **ctx
+            .accounts
+            .vault_state
+            .to_account_info()
+            .try_borrow_mut_lamports()? -= pool_recovery;
+        **ctx
+            .accounts
+            .lp_pool
+            .to_account_info()
+            .try_borrow_mut_lamports()? += pool_recovery;
     }
 
     // Update vault state

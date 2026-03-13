@@ -16,11 +16,9 @@ pub fn read_token_account_amount(account_info: &AccountInfo) -> Result<u64> {
         data.len() >= 72,
         crate::errors::LaunchVaultError::InvalidVaultTokenAccount
     );
-    Ok(u64::from_le_bytes(
-        data[64..72]
-            .try_into()
-            .map_err(|_| error!(crate::errors::LaunchVaultError::InvalidVaultTokenAccount))?,
-    ))
+    Ok(u64::from_le_bytes(data[64..72].try_into().map_err(
+        |_| error!(crate::errors::LaunchVaultError::InvalidVaultTokenAccount),
+    )?))
 }
 
 /// Build Token2022/SPL Token transfer_checked instruction
@@ -142,9 +140,7 @@ pub fn build_initialize_mint2_instruction(
 
     Instruction {
         program_id: *token_program,
-        accounts: vec![
-            AccountMeta::new(*mint, false),
-        ],
+        accounts: vec![AccountMeta::new(*mint, false)],
         data,
     }
 }

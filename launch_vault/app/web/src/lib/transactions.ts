@@ -93,6 +93,7 @@ export async function buildOpenPosition(
     userContributionSol: number;
     buyAmounts: BN[];
     maxSolCosts: BN[];
+    stopLossBps?: number;
     altAddress?: PublicKey;
   }
 ) {
@@ -151,7 +152,8 @@ export async function buildOpenPosition(
       new BN(Math.round(args.lpAllocationSol * LAMPORTS_PER_SOL)),
       new BN(Math.round(args.userContributionSol * LAMPORTS_PER_SOL)),
       args.buyAmounts,
-      args.maxSolCosts
+      args.maxSolCosts,
+      args.stopLossBps || 0
     )
     .accounts({
       user,
@@ -419,6 +421,7 @@ export async function buildDepositLp(
       lpPool,
       lpMint,
       depositorLpAta,
+      protocolConfig: deriveProtocolConfig(),
       tokenProgram: TOKEN_2022_PROGRAM_ID,
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
@@ -456,6 +459,140 @@ export async function buildWithdrawLp(
     .rpc();
 }
 
+// ── triggerStopLoss (executor) ──────────────────────────────────────────
+
+export async function buildTriggerStopLoss(
+  program: Program<LaunchVault>,
+  connection: { getAccountInfo: (pubkey: PublicKey) => Promise<any> },
+  vaultAddress: PublicKey,
+  tokenMint: PublicKey,
+  executor: PublicKey
+) {
+  const protocolConfig = deriveProtocolConfig();
+  const lpPool = deriveLpPool();
+  const vaultTokenAccount = deriveVaultATA(vaultAddress, tokenMint);
+  const pumpPDAs = derivePumpFunPDAs(tokenMint);
+
+  // Read vault state to get the owner for creator_vault derivation
+  const vaultState = await program.account.launchVaultState.fetch(vaultAddress);
+  const vaultOwner = (vaultState as any).user as PublicKey;
+  const creatorVault = derivePumpCreatorVault(vaultOwner);
+  const feeConfig = derivePumpFeeConfig();
+  const bondingCurveV2 = derivePumpBondingCurveV2(tokenMint);
+
+  // Read fee_recipient from PumpFun global state
+  const globalInfo = await connection.getAccountInfo(pumpPDAs.global);
+  if (!globalInfo) throw new Error("Cannot read PumpFun global account");
+  const feeRecipient = new PublicKey(globalInfo.data.subarray(41, 73));
+
+  // Read token balance to sell all
+  const tokenBalance = (vaultState as any).totalTokensBought as BN;
+
+  return program.methods
+    .triggerStopLoss(tokenBalance, new BN(0))
+    .accounts({
+      signer: executor,
+      vault: vaultAddress,
+      protocolConfig,
+      lpPool,
+      tokenMint,
+      pumpProgram: PUMP_FUN_PROGRAM_ID,
+      pumpGlobal: pumpPDAs.global,
+      pumpBondingCurve: pumpPDAs.bondingCurve,
+      pumpAssociatedBondingCurve: pumpPDAs.associatedBondingCurve,
+      pumpEventAuthority: pumpPDAs.eventAuthority,
+      pumpFeeRecipient: feeRecipient,
+      pumpCreatorVault: creatorVault,
+      pumpFeeConfig: feeConfig,
+      pumpFeeProgram: FEE_PROGRAM_ID,
+      pumpBondingCurveV2: bondingCurveV2,
+      tokenProgram: TOKEN_2022_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      vaultTokenAccount,
+    } as any)
+    .rpc();
+}
+
+// ── pauseProtocol ──────────────────────────────────────────────────────
+
+export async function buildPauseProtocol(
+  program: Program<LaunchVault>,
+  pauser: PublicKey,
+  reason: string
+) {
+  const protocolConfig = deriveProtocolConfig();
+
+  return program.methods
+    .pauseProtocol(reason)
+    .accounts({
+      signer: pauser,
+      protocolConfig,
+    } as any)
+    .rpc();
+}
+
+// ── resumeProtocol ─────────────────────────────────────────────────────
+
+export async function buildResumeProtocol(
+  program: Program<LaunchVault>,
+  admin: PublicKey
+) {
+  const protocolConfig = deriveProtocolConfig();
+
+  return program.methods
+    .resumeProtocol()
+    .accounts({
+      admin,
+      protocolConfig,
+    } as any)
+    .rpc();
+}
+
+// ── depositInsuranceFund (admin) ────────────────────────────────────────
+
+export async function buildDepositInsuranceFund(
+  program: Program<LaunchVault>,
+  admin: PublicKey,
+  amount: BN
+) {
+  const insuranceFund = deriveInsuranceFund();
+  const protocolConfig = deriveProtocolConfig();
+
+  return program.methods
+    .depositInsuranceFund(amount)
+    .accounts({
+      payer: admin,
+      insuranceFund,
+      protocolConfig,
+      systemProgram: SystemProgram.programId,
+    } as any)
+    .rpc();
+}
+
+// ── withdrawInsuranceFund (admin) ───────────────────────────────────────
+
+export async function buildWithdrawInsuranceFund(
+  program: Program<LaunchVault>,
+  admin: PublicKey,
+  amount: BN,
+  destination: PublicKey
+) {
+  const insuranceFund = deriveInsuranceFund();
+  const protocolConfig = deriveProtocolConfig();
+
+  return program.methods
+    .withdrawInsuranceFund(amount)
+    .accounts({
+      admin,
+      insuranceFund,
+      protocolConfig,
+      destination,
+      systemProgram: SystemProgram.programId,
+    } as any)
+    .rpc();
+}
+
 // ── updateProtocolConfig (admin) ────────────────────────────────────────
 
 export async function buildUpdateProtocolConfig(
@@ -472,7 +609,10 @@ export async function buildUpdateProtocolConfig(
     newInsuranceSplitBps?: number | null;
     newRedemptionFeeBps?: number | null;
     newAdmin?: PublicKey | null;
-    newStatus?: any | null;
+    newCbPositionLimit?: number | null;
+    newCbWindowSeconds?: BN | null;
+    newCbCooldownSeconds?: BN | null;
+    newMinInsuranceFund?: BN | null;
   }
 ) {
   const protocolConfig = deriveProtocolConfig();
@@ -489,7 +629,10 @@ export async function buildUpdateProtocolConfig(
       updates.newInsuranceSplitBps ?? null,
       updates.newRedemptionFeeBps ?? null,
       updates.newAdmin ?? null,
-      updates.newStatus ?? null
+      updates.newCbPositionLimit ?? null,
+      updates.newCbWindowSeconds ?? null,
+      updates.newCbCooldownSeconds ?? null,
+      updates.newMinInsuranceFund ?? null
     )
     .accounts({
       admin,

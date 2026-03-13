@@ -32,6 +32,23 @@ const ERROR_MAP: Record<number, string> = {
   6030: "Invalid LP token amount",
   6031: "Unauthorized seller",
   6032: "Slippage exceeded — output less than minimum",
+  6033: "User contribution is below minimum required",
+  6034: "LP allocation exceeds maximum per position",
+  6035: "User contribution ratio is below minimum",
+  6036: "Stop-loss is not configured for this position",
+  6037: "Stop-loss has already been triggered",
+  6038: "Current price is above stop-loss threshold",
+  6039: "Circuit breaker triggered, protocol paused",
+  6040: "Insurance fund balance below minimum",
+  6041: "Invalid insurance fund authority",
+  6042: "Insurance fund amount must be greater than zero",
+  6043: "Circuit breaker cooldown period not elapsed",
+  6044: "Unauthorized to pause/resume protocol",
+  6045: "Invalid circuit breaker parameter",
+  6046: "Invalid stop-loss parameter",
+  6047: "Protocol is not paused",
+  6048: "Invalid Pump.fun fee program",
+  6049: "Invalid bonding curve data",
 };
 
 export function parseAnchorError(err: any): string {

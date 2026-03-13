@@ -75,7 +75,7 @@ export function VaultDetail({ address }: VaultDetailProps) {
   const isClosed = statusKey === "closed" || statusKey === "timedOut";
 
   const now = Math.floor(Date.now() / 1000);
-  const openedTs = Number(vault.openedAt);
+  const openedTs = Number(vault.openTimestamp);
   const positionTimeout = config ? Number((config as any).positionTimeout) : 0;
   const expiresAt = openedTs + positionTimeout;
   const timeLeft = expiresAt - now;
@@ -173,6 +173,31 @@ export function VaultDetail({ address }: VaultDetailProps) {
           </InfoCard>
         )}
       </div>
+
+      {/* Stop-Loss Info */}
+      {Number(vault.stopLossBps) > 0 && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <h3 className="text-white font-medium mb-3">Stop-Loss Protection</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <span className="text-gray-500">Threshold</span>
+              <p className="text-white">{(Number(vault.stopLossBps) / 100).toFixed(1)}% below entry price</p>
+            </div>
+            <div>
+              <span className="text-gray-500">Status</span>
+              <p className={vault.stopLossTriggered ? "text-red-400 font-medium" : "text-green-400 font-medium"}>
+                {vault.stopLossTriggered ? "Triggered" : "Active"}
+              </p>
+            </div>
+            {vault.stopLossTriggered && Number(vault.stopLossTimestamp) > 0 && (
+              <div>
+                <span className="text-gray-500">Triggered At</span>
+                <p className="text-red-400">{formatTimestamp(Number(vault.stopLossTimestamp))}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Owner Actions */}
       {isOwner && isActive && (

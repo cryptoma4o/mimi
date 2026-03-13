@@ -113,3 +113,49 @@ pub struct InsuranceFundUpdatedEvent {
     pub amount_added: u64,
     pub timestamp: i64,
 }
+
+#[event]
+pub struct InsuranceFundDepositedEvent {
+    pub amount: u64,
+    pub new_total: u64,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct InsuranceFundWithdrawnEvent {
+    pub amount: u64,
+    pub new_total: u64,
+    pub destination: Pubkey,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct ProtocolPausedEvent {
+    pub pauser: Pubkey,
+    pub reason: String,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct ProtocolResumedEvent {
+    pub resumer: Pubkey,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct CircuitBreakerTriggeredEvent {
+    pub positions_in_window: u32,
+    pub window_limit: u32,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct StopLossTriggeredEvent {
+    pub vault: Pubkey,
+    pub token_mint: Pubkey,
+    pub entry_price: u64,
+    pub trigger_price: u64,
+    pub tokens_sold: u64,
+    pub sol_received: u64,
+    pub timestamp: i64,
+}

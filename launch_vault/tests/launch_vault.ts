@@ -324,15 +324,18 @@ describe("launch_vault", () => {
           250,                        // close_reward_bps (u16)
           500,                        // insurance_split_bps (u16)
           100,                        // redemption_fee_bps (u16)
+          new anchor.BN(10_000_000), // min_user_contribution (u64)
+          new anchor.BN(1_000_000_000), // max_lp_per_position (u64)
+          1000,                       // min_user_ratio_bps (u16)
         )
         .accounts({
           admin: wallet,
-          protocol_config: protocolConfig,
-          lp_pool: lpPool,
-          insurance_fund: insuranceFund,
-          lp_mint: lpMint,
-          token_program: TOKEN_2022_PROGRAM_ID,
-          system_program: SystemProgram.programId,
+          protocolConfig: protocolConfig,
+          lpPool: lpPool,
+          insuranceFund: insuranceFund,
+          lpMint: lpMint,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
           rent: SYSVAR_RENT_PUBKEY,
         } as any)
         .instruction();
@@ -357,11 +360,14 @@ describe("launch_vault", () => {
           null,  // new_insurance_split_bps
           null,  // new_redemption_fee_bps
           null,  // new_admin
-          null,  // new_status
+          null,  // new_cb_position_limit
+          null,  // new_cb_window_seconds
+          null,  // new_cb_cooldown_seconds
+          null,  // new_min_insurance_fund
         )
         .accounts({
           admin: wallet,
-          protocol_config: protocolConfig,
+          protocolConfig: protocolConfig,
         } as any)
         .instruction();
 
@@ -378,17 +384,18 @@ describe("launch_vault", () => {
         .depositLp(new anchor.BN(1_000_000_000))
         .accounts({
           depositor: wallet,
-          lp_pool: lpPool,
-          lp_mint: lpMint,
-          depositor_lp_ata: Keypair.generate().publicKey,
-          token_program: TOKEN_2022_PROGRAM_ID,
-          associated_token_program: ASSOCIATED_TOKEN_PROGRAM_ID,
-          system_program: SystemProgram.programId,
+          lpPool: lpPool,
+          lpMint: lpMint,
+          depositorLpAta: Keypair.generate().publicKey,
+          protocolConfig: deriveProtocolConfig(program.programId),
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
         } as any)
         .instruction();
 
       expect(ix.programId.toBase58()).to.equal(program.programId.toBase58());
-      expect(ix.keys.length).to.equal(7);
+      expect(ix.keys.length).to.equal(8);
     });
 
     // 4. withdraw_lp (6 accounts)
@@ -400,11 +407,11 @@ describe("launch_vault", () => {
         .withdrawLp(new anchor.BN(500_000_000))
         .accounts({
           withdrawer: wallet,
-          lp_pool: lpPool,
-          lp_mint: lpMint,
-          withdrawer_lp_ata: Keypair.generate().publicKey,
-          token_program: TOKEN_2022_PROGRAM_ID,
-          system_program: SystemProgram.programId,
+          lpPool: lpPool,
+          lpMint: lpMint,
+          withdrawerLpAta: Keypair.generate().publicKey,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
         } as any)
         .instruction();
 
@@ -421,20 +428,20 @@ describe("launch_vault", () => {
         .accounts({
           user: wallet,
           mint: mint.publicKey,
-          pump_program: PUMP_FUN_PROGRAM_ID,
-          pump_global: derivePumpGlobal(),
-          pump_mint_authority: derivePumpMintAuthority(),
-          pump_bonding_curve: derivePumpBondingCurve(mint.publicKey),
-          pump_associated_bonding_curve: Keypair.generate().publicKey,
-          mayhem_program: MAYHEM_PROGRAM_ID,
-          mayhem_global_params: PublicKey.default,
-          mayhem_sol_vault: PublicKey.default,
-          mayhem_state: PublicKey.default,
-          mayhem_token_vault: PublicKey.default,
-          pump_event_authority: derivePumpEventAuthority(),
-          system_program: SystemProgram.programId,
-          token_program: TOKEN_2022_PROGRAM_ID,
-          associated_token_program: ASSOCIATED_TOKEN_PROGRAM_ID,
+          pumpProgram: PUMP_FUN_PROGRAM_ID,
+          pumpGlobal: derivePumpGlobal(),
+          pumpMintAuthority: derivePumpMintAuthority(),
+          pumpBondingCurve: derivePumpBondingCurve(mint.publicKey),
+          pumpAssociatedBondingCurve: Keypair.generate().publicKey,
+          mayhemProgram: MAYHEM_PROGRAM_ID,
+          mayhemGlobalParams: PublicKey.default,
+          mayhemSolVault: PublicKey.default,
+          mayhemState: PublicKey.default,
+          mayhemTokenVault: PublicKey.default,
+          pumpEventAuthority: derivePumpEventAuthority(),
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         } as any)
         .instruction();
 
@@ -461,35 +468,36 @@ describe("launch_vault", () => {
           new anchor.BN(100_000_000),   // user_contribution
           [new anchor.BN(50_000_000)],  // buy_amounts
           [new anchor.BN(60_000_000)],  // max_sol_costs
+          500,                          // stop_loss_bps (u16)
         )
         .accounts({
           user: wallet,
           mint: mint.publicKey,
-          vault_state: vaultState,
-          protocol_config: protocolConfig,
-          lp_pool: lpPool,
+          vaultState: vaultState,
+          protocolConfig: protocolConfig,
+          lpPool: lpPool,
           treasury,
-          insurance_fund: insuranceFund,
-          pump_program: PUMP_FUN_PROGRAM_ID,
-          pump_global: derivePumpGlobal(),
-          pump_mint_authority: derivePumpMintAuthority(),
-          pump_bonding_curve: derivePumpBondingCurve(mint.publicKey),
-          pump_associated_bonding_curve: Keypair.generate().publicKey,
-          pump_event_authority: derivePumpEventAuthority(),
-          pump_fee_recipient: Keypair.generate().publicKey,
-          mayhem_program: MAYHEM_PROGRAM_ID,
-          mayhem_global_params: PublicKey.default,
-          mayhem_sol_vault: PublicKey.default,
-          mayhem_state: PublicKey.default,
-          mayhem_token_vault: PublicKey.default,
-          pump_global_volume_accumulator: derivePumpGlobalVolumeAccumulator(),
-          pump_creator_vault: derivePumpCreatorVault(wallet),
-          pump_fee_config: deriveFeeConfig(),
-          pump_bonding_curve_v2: derivePumpBondingCurveV2(mint.publicKey),
-          pump_fee_program: FEE_PROGRAM_ID,
-          system_program: SystemProgram.programId,
-          token_program: TOKEN_2022_PROGRAM_ID,
-          associated_token_program: ASSOCIATED_TOKEN_PROGRAM_ID,
+          insuranceFund: insuranceFund,
+          pumpProgram: PUMP_FUN_PROGRAM_ID,
+          pumpGlobal: derivePumpGlobal(),
+          pumpMintAuthority: derivePumpMintAuthority(),
+          pumpBondingCurve: derivePumpBondingCurve(mint.publicKey),
+          pumpAssociatedBondingCurve: Keypair.generate().publicKey,
+          pumpEventAuthority: derivePumpEventAuthority(),
+          pumpFeeRecipient: Keypair.generate().publicKey,
+          mayhemProgram: MAYHEM_PROGRAM_ID,
+          mayhemGlobalParams: PublicKey.default,
+          mayhemSolVault: PublicKey.default,
+          mayhemState: PublicKey.default,
+          mayhemTokenVault: PublicKey.default,
+          pumpGlobalVolumeAccumulator: derivePumpGlobalVolumeAccumulator(),
+          pumpCreatorVault: derivePumpCreatorVault(wallet),
+          pumpFeeConfig: deriveFeeConfig(),
+          pumpBondingCurveV2: derivePumpBondingCurveV2(mint.publicKey),
+          pumpFeeProgram: FEE_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           rent: SYSVAR_RENT_PUBKEY,
         } as any)
         .instruction();
@@ -510,23 +518,23 @@ describe("launch_vault", () => {
         .sellPosition(new anchor.BN(1_000_000), new anchor.BN(500_000))
         .accounts({
           seller: wallet,
-          vault_state: vaultState,
-          protocol_config: protocolConfig,
-          lp_pool: lpPool,
-          vault_token_account: Keypair.generate().publicKey,
-          token_mint: mint,
-          pump_program: PUMP_FUN_PROGRAM_ID,
-          pump_global: derivePumpGlobal(),
-          pump_fee_recipient: Keypair.generate().publicKey,
-          pump_bonding_curve: derivePumpBondingCurve(mint),
-          pump_associated_bonding_curve: Keypair.generate().publicKey,
-          pump_event_authority: derivePumpEventAuthority(),
-          pump_creator_vault: derivePumpCreatorVault(wallet),
-          pump_fee_config: deriveFeeConfig(),
-          pump_bonding_curve_v2: derivePumpBondingCurveV2(mint),
-          pump_fee_program: FEE_PROGRAM_ID,
-          system_program: SystemProgram.programId,
-          token_program: TOKEN_2022_PROGRAM_ID,
+          vaultState: vaultState,
+          protocolConfig: protocolConfig,
+          lpPool: lpPool,
+          vaultTokenAccount: Keypair.generate().publicKey,
+          tokenMint: mint,
+          pumpProgram: PUMP_FUN_PROGRAM_ID,
+          pumpGlobal: derivePumpGlobal(),
+          pumpFeeRecipient: Keypair.generate().publicKey,
+          pumpBondingCurve: derivePumpBondingCurve(mint),
+          pumpAssociatedBondingCurve: Keypair.generate().publicKey,
+          pumpEventAuthority: derivePumpEventAuthority(),
+          pumpCreatorVault: derivePumpCreatorVault(wallet),
+          pumpFeeConfig: deriveFeeConfig(),
+          pumpBondingCurveV2: derivePumpBondingCurveV2(mint),
+          pumpFeeProgram: FEE_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
         } as any)
         .instruction();
 
@@ -546,15 +554,15 @@ describe("launch_vault", () => {
         .redeemTokens(new anchor.BN(500_000))
         .accounts({
           user: wallet,
-          vault_state: vaultState,
-          protocol_config: protocolConfig,
-          lp_pool: lpPool,
+          vaultState: vaultState,
+          protocolConfig: protocolConfig,
+          lpPool: lpPool,
           treasury,
-          vault_token_account: Keypair.generate().publicKey,
-          user_token_account: Keypair.generate().publicKey,
-          token_mint: mint,
-          system_program: SystemProgram.programId,
-          token_program: TOKEN_2022_PROGRAM_ID,
+          vaultTokenAccount: Keypair.generate().publicKey,
+          userTokenAccount: Keypair.generate().publicKey,
+          tokenMint: mint,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
         } as any)
         .instruction();
 
@@ -573,13 +581,13 @@ describe("launch_vault", () => {
         .closePosition()
         .accounts({
           closer: wallet,
-          vault_state: vaultState,
-          protocol_config: protocolConfig,
-          lp_pool: lpPool,
-          vault_owner: wallet,
-          vault_token_account: Keypair.generate().publicKey,
-          token_program: TOKEN_2022_PROGRAM_ID,
-          system_program: SystemProgram.programId,
+          vaultState: vaultState,
+          protocolConfig: protocolConfig,
+          lpPool: lpPool,
+          vaultOwner: wallet,
+          vaultTokenAccount: Keypair.generate().publicKey,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
         } as any)
         .instruction();
 
@@ -598,28 +606,678 @@ describe("launch_vault", () => {
         .forceClosePosition()
         .accounts({
           executor: wallet,
-          vault_state: vaultState,
-          protocol_config: protocolConfig,
-          lp_pool: lpPool,
-          vault_token_account: Keypair.generate().publicKey,
-          token_mint: mint,
-          pump_program: PUMP_FUN_PROGRAM_ID,
-          pump_global: derivePumpGlobal(),
-          pump_fee_recipient: Keypair.generate().publicKey,
-          pump_bonding_curve: derivePumpBondingCurve(mint),
-          pump_associated_bonding_curve: Keypair.generate().publicKey,
-          pump_event_authority: derivePumpEventAuthority(),
-          pump_creator_vault: derivePumpCreatorVault(wallet),
-          pump_fee_config: deriveFeeConfig(),
-          pump_bonding_curve_v2: derivePumpBondingCurveV2(mint),
-          pump_fee_program: FEE_PROGRAM_ID,
-          system_program: SystemProgram.programId,
-          token_program: TOKEN_2022_PROGRAM_ID,
+          vaultState: vaultState,
+          protocolConfig: protocolConfig,
+          lpPool: lpPool,
+          vaultTokenAccount: Keypair.generate().publicKey,
+          tokenMint: mint,
+          pumpProgram: PUMP_FUN_PROGRAM_ID,
+          pumpGlobal: derivePumpGlobal(),
+          pumpFeeRecipient: Keypair.generate().publicKey,
+          pumpBondingCurve: derivePumpBondingCurve(mint),
+          pumpAssociatedBondingCurve: Keypair.generate().publicKey,
+          pumpEventAuthority: derivePumpEventAuthority(),
+          pumpCreatorVault: derivePumpCreatorVault(wallet),
+          pumpFeeConfig: deriveFeeConfig(),
+          pumpBondingCurveV2: derivePumpBondingCurveV2(mint),
+          pumpFeeProgram: FEE_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
         } as any)
         .instruction();
 
       expect(ix.programId.toBase58()).to.equal(program.programId.toBase58());
       expect(ix.keys.length).to.equal(18);
+    });
+
+    // 10. trigger_stop_loss (19 accounts)
+    it("builds trigger_stop_loss instruction correctly", async () => {
+      const mint = Keypair.generate().publicKey;
+      const protocolConfig = deriveProtocolConfig(program.programId);
+      const lpPool = deriveLpPool(program.programId);
+      const vaultState = deriveVaultPDA(wallet, mint, program.programId);
+
+      const ix = await program.methods
+        .triggerStopLoss(new anchor.BN(1_000_000), new anchor.BN(400_000))
+        .accounts({
+          signer: wallet,
+          vault: vaultState,
+          protocolConfig: protocolConfig,
+          lpPool: lpPool,
+          tokenMint: mint,
+          pumpProgram: PUMP_FUN_PROGRAM_ID,
+          pumpGlobal: derivePumpGlobal(),
+          pumpBondingCurve: derivePumpBondingCurve(mint),
+          pumpAssociatedBondingCurve: Keypair.generate().publicKey,
+          pumpEventAuthority: derivePumpEventAuthority(),
+          pumpFeeRecipient: Keypair.generate().publicKey,
+          pumpCreatorVault: derivePumpCreatorVault(wallet),
+          pumpFeeConfig: deriveFeeConfig(),
+          pumpFeeProgram: FEE_PROGRAM_ID,
+          pumpBondingCurveV2: derivePumpBondingCurveV2(mint),
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          vaultTokenAccount: Keypair.generate().publicKey,
+        } as any)
+        .instruction();
+
+      expect(ix.programId.toBase58()).to.equal(program.programId.toBase58());
+      // 19 named accounts (without remaining_accounts)
+      expect(ix.keys.length).to.equal(19);
+    });
+
+    // 11. deposit_insurance_fund (4 accounts)
+    it("builds deposit_insurance_fund instruction correctly", async () => {
+      const protocolConfig = deriveProtocolConfig(program.programId);
+      const insuranceFund = deriveInsuranceFund(program.programId);
+
+      const ix = await program.methods
+        .depositInsuranceFund(new anchor.BN(100_000_000))
+        .accounts({
+          payer: wallet,
+          insuranceFund: insuranceFund,
+          protocolConfig: protocolConfig,
+          systemProgram: SystemProgram.programId,
+        } as any)
+        .instruction();
+
+      expect(ix.programId.toBase58()).to.equal(program.programId.toBase58());
+      expect(ix.keys.length).to.equal(4);
+    });
+
+    // 12. withdraw_insurance_fund (5 accounts)
+    it("builds withdraw_insurance_fund instruction correctly", async () => {
+      const protocolConfig = deriveProtocolConfig(program.programId);
+      const insuranceFund = deriveInsuranceFund(program.programId);
+
+      const ix = await program.methods
+        .withdrawInsuranceFund(new anchor.BN(50_000_000))
+        .accounts({
+          admin: wallet,
+          insuranceFund: insuranceFund,
+          protocolConfig: protocolConfig,
+          destination: wallet,
+          systemProgram: SystemProgram.programId,
+        } as any)
+        .instruction();
+
+      expect(ix.programId.toBase58()).to.equal(program.programId.toBase58());
+      expect(ix.keys.length).to.equal(5);
+    });
+
+    // 14. pause_protocol (2 accounts)
+    it("builds pause_protocol instruction correctly", async () => {
+      const protocolConfig = deriveProtocolConfig(program.programId);
+
+      const ix = await program.methods
+        .pauseProtocol("Test pause")
+        .accounts({
+          signer: wallet,
+          protocolConfig: protocolConfig,
+        } as any)
+        .instruction();
+
+      expect(ix.programId.toBase58()).to.equal(program.programId.toBase58());
+      expect(ix.keys.length).to.equal(2);
+    });
+
+    // 15. resume_protocol (2 accounts)
+    it("builds resume_protocol instruction correctly", async () => {
+      const protocolConfig = deriveProtocolConfig(program.programId);
+
+      const ix = await program.methods
+        .resumeProtocol()
+        .accounts({
+          admin: wallet,
+          protocolConfig: protocolConfig,
+        } as any)
+        .instruction();
+
+      expect(ix.programId.toBase58()).to.equal(program.programId.toBase58());
+      expect(ix.keys.length).to.equal(2);
+    });
+  });
+
+  // --------------------------------------------------------
+  // Functional Tests (on-chain, local validator)
+  // --------------------------------------------------------
+
+  describe("Functional Tests", () => {
+    const executor = Keypair.generate();
+    const treasury = Keypair.generate();
+
+    // Shared PDAs
+    const protocolConfig = deriveProtocolConfig(program.programId);
+    const lpPool = deriveLpPool(program.programId);
+    const lpMint = deriveLpMint(program.programId);
+    const insuranceFund = deriveInsuranceFund(program.programId);
+
+    // Helper: derive depositor LP ATA (Token2022)
+    function deriveLpAta(owner: PublicKey): PublicKey {
+      const [ata] = PublicKey.findProgramAddressSync(
+        [
+          owner.toBuffer(),
+          TOKEN_2022_PROGRAM_ID.toBuffer(),
+          lpMint.toBuffer(),
+        ],
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      );
+      return ata;
+    }
+
+    // Helper: confirm tx
+    async function confirmTx(sig: string) {
+      await provider.connection.confirmTransaction(sig, "confirmed");
+    }
+
+    // Helper: get token balance
+    async function getTokenBalance(ata: PublicKey): Promise<bigint> {
+      const info = await provider.connection.getAccountInfo(ata);
+      if (!info) return BigInt(0);
+      // Token2022 account data: offset 64 for amount (u64 LE)
+      const amount = info.data.readBigUInt64LE(64);
+      return amount;
+    }
+
+    // ========================================
+    // 1. initialize_protocol — Happy Path
+    // ========================================
+
+    describe("initialize_protocol", () => {
+      it("initializes protocol with correct parameters", async () => {
+        // Try to initialize — if already done, verify existing state
+        try {
+          const tx = await program.methods
+            .initializeProtocol(
+              executor.publicKey,
+              treasury.publicKey,
+              new anchor.BN(10_000_000),       // fixed_fee: 0.01 SOL
+              500,                              // fee_bps: 5%
+              8500,                             // max_utilization_bps: 85%
+              new anchor.BN(3600),              // position_timeout: 1 hour
+              0,                                // close_reward_bps
+              2000,                             // insurance_split_bps: 20%
+              500,                              // redemption_fee_bps: 5%
+              new anchor.BN(100_000_000),       // min_user_contribution: 0.1 SOL
+              new anchor.BN(5_000_000_000),     // max_lp_per_position: 5 SOL
+              2000,                             // min_user_ratio_bps: 20%
+            )
+            .accounts({
+              admin: wallet,
+              protocolConfig,
+              lpPool,
+              insuranceFund,
+              lpMint,
+              tokenProgram: TOKEN_2022_PROGRAM_ID,
+              systemProgram: SystemProgram.programId,
+              rent: SYSVAR_RENT_PUBKEY,
+            } as any)
+            .rpc();
+          await confirmTx(tx);
+        } catch (err: any) {
+          // Already initialized — ok, continue with verification
+          if (!err.toString().includes("already in use") && !err.toString().includes("0x0")) {
+            throw err;
+          }
+        }
+
+        // Verify protocol_config exists and is valid
+        const config = await program.account.protocolConfig.fetch(protocolConfig);
+        expect(config.admin.toBase58()).to.equal(wallet.toBase58());
+        expect(JSON.stringify(config.status)).to.satisfy(
+          (s: string) => s.includes("active") || s.includes("paused")
+        );
+
+        // Verify LP pool exists
+        const pool = await program.account.lpPool.fetch(lpPool);
+        expect(pool.lpMint.toBase58()).to.equal(lpMint.toBase58());
+
+        // Verify LP mint exists (Token2022)
+        const mintInfo = await provider.connection.getAccountInfo(lpMint);
+        expect(mintInfo).to.not.be.null;
+        expect(mintInfo!.owner.toBase58()).to.equal(TOKEN_2022_PROGRAM_ID.toBase58());
+
+        // Verify insurance fund exists
+        const fund = await program.account.insuranceFund.fetch(insuranceFund);
+        expect(fund.authority.toBase58()).to.equal(wallet.toBase58());
+      });
+
+      // ========================================
+      // 2. initialize_protocol — Error Cases
+      // ========================================
+
+      it("fails on double initialization", async () => {
+        try {
+          await program.methods
+            .initializeProtocol(
+              executor.publicKey,
+              treasury.publicKey,
+              new anchor.BN(10_000_000),
+              500, 8500,
+              new anchor.BN(3600),
+              0, 2000, 500,
+              new anchor.BN(100_000_000),
+              new anchor.BN(5_000_000_000),
+              2000,
+            )
+            .accounts({
+              admin: wallet,
+              protocolConfig,
+              lpPool,
+              insuranceFund,
+              lpMint,
+              tokenProgram: TOKEN_2022_PROGRAM_ID,
+              systemProgram: SystemProgram.programId,
+              rent: SYSVAR_RENT_PUBKEY,
+            } as any)
+            .rpc();
+          expect.fail("Should have thrown on double init");
+        } catch (err: any) {
+          // Anchor throws when trying to init an already-initialized account
+          expect(err.toString()).to.satisfy(
+            (s: string) => s.includes("already in use") || s.includes("already been processed") || s.includes("0x0")
+          );
+        }
+      });
+    });
+
+    // ========================================
+    // 3. deposit_lp — Happy Path
+    // ========================================
+
+    describe("deposit_lp", () => {
+      const depositAmount = 2_000_000_000; // 2 SOL
+
+      it("deposits SOL and mints LP tokens", async () => {
+        const depositorLpAta = deriveLpAta(wallet);
+
+        const poolBefore = await program.account.lpPool.fetch(lpPool);
+        const totalBefore = poolBefore.totalLiquidity.toNumber();
+        const supplyBefore = poolBefore.lpMintSupply.toNumber();
+
+        const tx = await program.methods
+          .depositLp(new anchor.BN(depositAmount))
+          .accounts({
+            depositor: wallet,
+            protocolConfig,
+            lpPool,
+            lpMint,
+            depositorLpAta,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+          } as any)
+          .rpc();
+        await confirmTx(tx);
+
+        // Verify LP pool updated
+        const poolAfter = await program.account.lpPool.fetch(lpPool);
+        expect(poolAfter.totalLiquidity.toNumber()).to.equal(totalBefore + depositAmount);
+        expect(poolAfter.availableLiquidity.toNumber()).to.be.greaterThan(0);
+        // LP supply increased
+        expect(poolAfter.lpMintSupply.toNumber()).to.be.greaterThan(supplyBefore);
+
+        // Verify LP tokens in depositor's ATA (should be > 0)
+        const lpBalance = await getTokenBalance(depositorLpAta);
+        expect(Number(lpBalance)).to.be.greaterThan(0);
+      });
+
+      // ========================================
+      // 4. deposit_lp — Error Cases
+      // ========================================
+
+      it("fails with zero deposit amount", async () => {
+        const depositorLpAta = deriveLpAta(wallet);
+        try {
+          await program.methods
+            .depositLp(new anchor.BN(0))
+            .accounts({
+              depositor: wallet,
+              protocolConfig,
+              lpPool,
+              lpMint,
+              depositorLpAta,
+              tokenProgram: TOKEN_2022_PROGRAM_ID,
+              associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+              systemProgram: SystemProgram.programId,
+            } as any)
+            .rpc();
+          expect.fail("Should have thrown on zero deposit");
+        } catch (err: any) {
+          expect(err.toString()).to.include("ZeroDepositAmount");
+        }
+      });
+    });
+
+    // ========================================
+    // 5. withdraw_lp — Happy Path
+    // ========================================
+
+    describe("withdraw_lp", () => {
+      it("withdraws half of LP tokens and gets SOL back", async () => {
+        const withdrawerLpAta = deriveLpAta(wallet);
+
+        const poolBefore = await program.account.lpPool.fetch(lpPool);
+        const lpSupplyBefore = poolBefore.lpMintSupply.toNumber();
+        const totalLiqBefore = poolBefore.totalLiquidity.toNumber();
+        const halfLp = Math.floor(lpSupplyBefore / 2);
+
+        const solBalanceBefore = await provider.connection.getBalance(wallet);
+
+        const tx = await program.methods
+          .withdrawLp(new anchor.BN(halfLp))
+          .accounts({
+            withdrawer: wallet,
+            lpPool,
+            lpMint,
+            withdrawerLpAta,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+          } as any)
+          .rpc();
+        await confirmTx(tx);
+
+        // Verify LP pool state
+        const poolAfter = await program.account.lpPool.fetch(lpPool);
+        expect(poolAfter.lpMintSupply.toNumber()).to.equal(lpSupplyBefore - halfLp);
+        expect(poolAfter.totalLiquidity.toNumber()).to.be.lessThan(totalLiqBefore);
+
+        // Verify SOL received (approximately — minus tx fee)
+        const solBalanceAfter = await provider.connection.getBalance(wallet);
+        const solDiff = solBalanceAfter - solBalanceBefore;
+        // Should have gained SOL (minus tx fees)
+        expect(solDiff).to.be.greaterThan(0);
+      });
+
+      // ========================================
+      // 6. withdraw_lp — Error Cases
+      // ========================================
+
+      it("fails when withdrawing more LP tokens than available", async () => {
+        const withdrawerLpAta = deriveLpAta(wallet);
+        const pool = await program.account.lpPool.fetch(lpPool);
+        const tooMuch = pool.lpMintSupply.toNumber() + 1_000_000_000;
+
+        try {
+          await program.methods
+            .withdrawLp(new anchor.BN(tooMuch))
+            .accounts({
+              withdrawer: wallet,
+              lpPool,
+              lpMint,
+              withdrawerLpAta,
+              tokenProgram: TOKEN_2022_PROGRAM_ID,
+              systemProgram: SystemProgram.programId,
+            } as any)
+            .rpc();
+          expect.fail("Should have thrown on excessive withdraw");
+        } catch (err: any) {
+          // Any error is acceptable — either pool check or token insufficient funds
+          expect(err).to.exist;
+        }
+      });
+    });
+
+    // ========================================
+    // 7. pause_protocol / resume_protocol
+    // ========================================
+
+    describe("pause_protocol / resume_protocol", () => {
+      it("pauses protocol with admin", async () => {
+        const tx = await program.methods
+          .pauseProtocol("Test pause reason")
+          .accounts({
+            signer: wallet,
+            protocolConfig,
+          } as any)
+          .rpc();
+        await confirmTx(tx);
+
+        const config = await program.account.protocolConfig.fetch(protocolConfig);
+        expect(JSON.stringify(config.status)).to.include("paused");
+      });
+
+      it("deposit_lp fails when protocol is paused", async () => {
+        const depositorLpAta = deriveLpAta(wallet);
+        try {
+          await program.methods
+            .depositLp(new anchor.BN(1_000_000_000))
+            .accounts({
+              depositor: wallet,
+              protocolConfig,
+              lpPool,
+              lpMint,
+              depositorLpAta,
+              tokenProgram: TOKEN_2022_PROGRAM_ID,
+              associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+              systemProgram: SystemProgram.programId,
+            } as any)
+            .rpc();
+          expect.fail("Should have thrown on paused protocol");
+        } catch (err: any) {
+          expect(err.toString()).to.include("ProtocolPaused");
+        }
+      });
+
+      it("fails to pause already paused protocol", async () => {
+        try {
+          await program.methods
+            .pauseProtocol("Double pause")
+            .accounts({
+              signer: wallet,
+              protocolConfig,
+            } as any)
+            .rpc();
+          expect.fail("Should have thrown on double pause");
+        } catch (err: any) {
+          expect(err.toString()).to.include("ProtocolPaused");
+        }
+      });
+
+      it("resumes protocol with admin", async () => {
+        const tx = await program.methods
+          .resumeProtocol()
+          .accounts({
+            admin: wallet,
+            protocolConfig,
+          } as any)
+          .rpc();
+        await confirmTx(tx);
+
+        const config = await program.account.protocolConfig.fetch(protocolConfig);
+        expect(JSON.stringify(config.status)).to.include("active");
+      });
+
+      it("fails to resume when not paused", async () => {
+        try {
+          await program.methods
+            .resumeProtocol()
+            .accounts({
+              admin: wallet,
+              protocolConfig,
+            } as any)
+            .rpc();
+          expect.fail("Should have thrown when not paused");
+        } catch (err: any) {
+          expect(err.toString()).to.include("ProtocolNotPaused");
+        }
+      });
+
+      it("unauthorized user cannot pause protocol", async () => {
+        const rando = Keypair.generate();
+        // Fund from provider instead of airdrop to avoid rate limits
+        const fundTx = new anchor.web3.Transaction().add(
+          SystemProgram.transfer({
+            fromPubkey: wallet,
+            toPubkey: rando.publicKey,
+            lamports: 100_000_000,
+          })
+        );
+        await provider.sendAndConfirm(fundTx);
+
+        try {
+          await program.methods
+            .pauseProtocol("Hack attempt")
+            .accounts({
+              signer: rando.publicKey,
+              protocolConfig,
+            } as any)
+            .signers([rando])
+            .rpc();
+          expect.fail("Should have thrown on unauthorized pause");
+        } catch (err: any) {
+          expect(err.toString()).to.include("UnauthorizedPauser");
+        }
+      });
+    });
+
+    // ========================================
+    // 8. deposit_insurance_fund / withdraw_insurance_fund
+    // ========================================
+
+    describe("insurance_fund operations", () => {
+      const depositInsuranceAmount = 500_000_000; // 0.5 SOL
+      const withdrawInsuranceAmount = 200_000_000; // 0.2 SOL
+
+      it("deposits SOL into insurance fund", async () => {
+        const fundBefore = await program.account.insuranceFund.fetch(insuranceFund);
+        const beforeTotal = fundBefore.totalSol.toNumber();
+
+        const tx = await program.methods
+          .depositInsuranceFund(new anchor.BN(depositInsuranceAmount))
+          .accounts({
+            payer: wallet,
+            insuranceFund,
+            protocolConfig,
+            systemProgram: SystemProgram.programId,
+          } as any)
+          .rpc();
+        await confirmTx(tx);
+
+        const fundAfter = await program.account.insuranceFund.fetch(insuranceFund);
+        expect(fundAfter.totalSol.toNumber()).to.equal(beforeTotal + depositInsuranceAmount);
+      });
+
+      it("fails to deposit zero into insurance fund", async () => {
+        try {
+          await program.methods
+            .depositInsuranceFund(new anchor.BN(0))
+            .accounts({
+              payer: wallet,
+              insuranceFund,
+              protocolConfig,
+              systemProgram: SystemProgram.programId,
+            } as any)
+            .rpc();
+          expect.fail("Should have thrown on zero deposit");
+        } catch (err: any) {
+          expect(err.toString()).to.include("ZeroInsuranceFundAmount");
+        }
+      });
+
+      it("withdraws SOL from insurance fund", async () => {
+        const destination = Keypair.generate();
+        // Fund destination from provider instead of airdrop
+        const fundTx = new anchor.web3.Transaction().add(
+          SystemProgram.transfer({
+            fromPubkey: wallet,
+            toPubkey: destination.publicKey,
+            lamports: 1_000_000,
+          })
+        );
+        await provider.sendAndConfirm(fundTx);
+
+        const destBalBefore = await provider.connection.getBalance(destination.publicKey);
+        const fundBefore = await program.account.insuranceFund.fetch(insuranceFund);
+
+        const tx = await program.methods
+          .withdrawInsuranceFund(new anchor.BN(withdrawInsuranceAmount))
+          .accounts({
+            admin: wallet,
+            insuranceFund,
+            protocolConfig,
+            destination: destination.publicKey,
+            systemProgram: SystemProgram.programId,
+          } as any)
+          .rpc();
+        await confirmTx(tx);
+
+        const fundAfter = await program.account.insuranceFund.fetch(insuranceFund);
+        const expectedTotal = fundBefore.totalSol.toNumber() - withdrawInsuranceAmount;
+        expect(fundAfter.totalSol.toNumber()).to.equal(expectedTotal);
+
+        const destBalAfter = await provider.connection.getBalance(destination.publicKey);
+        expect(destBalAfter - destBalBefore).to.equal(withdrawInsuranceAmount);
+      });
+
+      it("fails to withdraw more than available in insurance fund", async () => {
+        const fund = await program.account.insuranceFund.fetch(insuranceFund);
+        const tooMuch = fund.totalSol.toNumber() + 1_000_000_000;
+
+        try {
+          await program.methods
+            .withdrawInsuranceFund(new anchor.BN(tooMuch))
+            .accounts({
+              admin: wallet,
+              insuranceFund,
+              protocolConfig,
+              destination: wallet,
+              systemProgram: SystemProgram.programId,
+            } as any)
+            .rpc();
+          expect.fail("Should have thrown on excessive withdraw");
+        } catch (err: any) {
+          expect(err.toString()).to.include("InsuranceFundBelowMinimum");
+        }
+      });
+
+      it("fails to withdraw zero from insurance fund", async () => {
+        try {
+          await program.methods
+            .withdrawInsuranceFund(new anchor.BN(0))
+            .accounts({
+              admin: wallet,
+              insuranceFund,
+              protocolConfig,
+              destination: wallet,
+              systemProgram: SystemProgram.programId,
+            } as any)
+            .rpc();
+          expect.fail("Should have thrown on zero withdraw");
+        } catch (err: any) {
+          expect(err.toString()).to.include("ZeroInsuranceFundAmount");
+        }
+      });
+
+      it("unauthorized user cannot withdraw from insurance fund", async () => {
+        const rando = Keypair.generate();
+        const fundRandoTx = new anchor.web3.Transaction().add(
+          SystemProgram.transfer({
+            fromPubkey: wallet,
+            toPubkey: rando.publicKey,
+            lamports: 100_000_000,
+          })
+        );
+        await provider.sendAndConfirm(fundRandoTx);
+
+        try {
+          await program.methods
+            .withdrawInsuranceFund(new anchor.BN(100_000_000))
+            .accounts({
+              admin: rando.publicKey,
+              insuranceFund,
+              protocolConfig,
+              destination: rando.publicKey,
+              systemProgram: SystemProgram.programId,
+            } as any)
+            .signers([rando])
+            .rpc();
+          expect.fail("Should have thrown on unauthorized withdraw");
+        } catch (err: any) {
+          expect(err.toString()).to.include("InvalidInsuranceFundAuthority");
+        }
+      });
     });
   });
 });

@@ -2,22 +2,18 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
 
 /// Pump.fun v2 program ID
-pub const PUMP_FUN_PROGRAM_ID: Pubkey =
-    pubkey!("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
+pub const PUMP_FUN_PROGRAM_ID: Pubkey = pubkey!("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
 
 /// Mayhem program ID
-pub const MAYHEM_PROGRAM_ID: Pubkey =
-    pubkey!("MAyhSmzXzV1pTf7LsNkrNwkWKTo4ougAJ1PPg47MD4e");
+pub const MAYHEM_PROGRAM_ID: Pubkey = pubkey!("MAyhSmzXzV1pTf7LsNkrNwkWKTo4ougAJ1PPg47MD4e");
 
 /// PumpFun Fee program ID
-pub const FEE_PROGRAM_ID: Pubkey =
-    pubkey!("pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ");
+pub const FEE_PROGRAM_ID: Pubkey = pubkey!("pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ");
 
 /// Fee config seed constant (hardcoded by PumpFun)
 pub const FEE_SEED_CONST: [u8; 32] = [
-    1, 86, 224, 246, 147, 102, 90, 207, 68, 219,
-    21, 104, 191, 23, 91, 170, 81, 137, 203, 151,
-    245, 210, 255, 59, 101, 93, 43, 182, 253, 109, 24, 176,
+    1, 86, 224, 246, 147, 102, 90, 207, 68, 219, 21, 104, 191, 23, 91, 170, 81, 137, 203, 151, 245,
+    210, 255, 59, 101, 93, 43, 182, 253, 109, 24, 176,
 ];
 
 /// Maximum number of buyers in a launch bundle
@@ -68,10 +64,8 @@ struct SellArgs {
 
 /// Derive PumpFun global_volume_accumulator PDA
 pub fn derive_global_volume_accumulator() -> Pubkey {
-    let (pda, _) = Pubkey::find_program_address(
-        &[b"global_volume_accumulator"],
-        &PUMP_FUN_PROGRAM_ID,
-    );
+    let (pda, _) =
+        Pubkey::find_program_address(&[b"global_volume_accumulator"], &PUMP_FUN_PROGRAM_ID);
     pda
 }
 
@@ -86,28 +80,21 @@ pub fn derive_user_volume_accumulator(user: &Pubkey) -> Pubkey {
 
 /// Derive PumpFun creator_vault PDA
 pub fn derive_creator_vault(creator: &Pubkey) -> Pubkey {
-    let (pda, _) = Pubkey::find_program_address(
-        &[b"creator-vault", creator.as_ref()],
-        &PUMP_FUN_PROGRAM_ID,
-    );
+    let (pda, _) =
+        Pubkey::find_program_address(&[b"creator-vault", creator.as_ref()], &PUMP_FUN_PROGRAM_ID);
     pda
 }
 
 /// Derive PumpFun fee_config PDA (from Fee Program)
 pub fn derive_fee_config() -> Pubkey {
-    let (pda, _) = Pubkey::find_program_address(
-        &[b"fee_config", &FEE_SEED_CONST],
-        &FEE_PROGRAM_ID,
-    );
+    let (pda, _) = Pubkey::find_program_address(&[b"fee_config", &FEE_SEED_CONST], &FEE_PROGRAM_ID);
     pda
 }
 
 /// Derive PumpFun bonding_curve_v2 PDA
 pub fn derive_bonding_curve_v2(mint: &Pubkey) -> Pubkey {
-    let (pda, _) = Pubkey::find_program_address(
-        &[b"bonding-curve-v2", mint.as_ref()],
-        &PUMP_FUN_PROGRAM_ID,
-    );
+    let (pda, _) =
+        Pubkey::find_program_address(&[b"bonding-curve-v2", mint.as_ref()], &PUMP_FUN_PROGRAM_ID);
     pda
 }
 
@@ -142,23 +129,23 @@ pub fn build_buy_instruction(
     args.serialize(&mut data).unwrap();
 
     let accounts = vec![
-        AccountMeta::new_readonly(*global, false),              // 0
-        AccountMeta::new(*fee_recipient, false),                // 1
-        AccountMeta::new_readonly(*mint, false),                // 2
-        AccountMeta::new(*bonding_curve, false),                // 3
-        AccountMeta::new(*associated_bonding_curve, false),     // 4
-        AccountMeta::new(*associated_user, false),              // 5
-        AccountMeta::new(*user, true),                          // 6
-        AccountMeta::new_readonly(*system_program, false),      // 7
-        AccountMeta::new_readonly(*token_program, false),       // 8
-        AccountMeta::new(*creator_vault, false),                // 9
-        AccountMeta::new_readonly(*event_authority, false),     // 10
-        AccountMeta::new_readonly(PUMP_FUN_PROGRAM_ID, false),  // 11
+        AccountMeta::new_readonly(*global, false),             // 0
+        AccountMeta::new(*fee_recipient, false),               // 1
+        AccountMeta::new_readonly(*mint, false),               // 2
+        AccountMeta::new(*bonding_curve, false),               // 3
+        AccountMeta::new(*associated_bonding_curve, false),    // 4
+        AccountMeta::new(*associated_user, false),             // 5
+        AccountMeta::new(*user, true),                         // 6
+        AccountMeta::new_readonly(*system_program, false),     // 7
+        AccountMeta::new_readonly(*token_program, false),      // 8
+        AccountMeta::new(*creator_vault, false),               // 9
+        AccountMeta::new_readonly(*event_authority, false),    // 10
+        AccountMeta::new_readonly(PUMP_FUN_PROGRAM_ID, false), // 11
         AccountMeta::new_readonly(*global_volume_accumulator, false), // 12
-        AccountMeta::new(*user_volume_accumulator, false),      // 13
-        AccountMeta::new_readonly(*fee_config, false),          // 14
-        AccountMeta::new_readonly(FEE_PROGRAM_ID, false),       // 15
-        AccountMeta::new_readonly(*bonding_curve_v2, false),    // 16
+        AccountMeta::new(*user_volume_accumulator, false),     // 13
+        AccountMeta::new_readonly(*fee_config, false),         // 14
+        AccountMeta::new_readonly(FEE_PROGRAM_ID, false),      // 15
+        AccountMeta::new_readonly(*bonding_curve_v2, false),   // 16
     ];
 
     Instruction {
@@ -201,21 +188,21 @@ pub fn build_sell_instruction(
     args.serialize(&mut data).unwrap();
 
     let accounts = vec![
-        AccountMeta::new_readonly(*global, false),              // 0
-        AccountMeta::new(*fee_recipient, false),                // 1
-        AccountMeta::new_readonly(*mint, false),                // 2
-        AccountMeta::new(*bonding_curve, false),                // 3
-        AccountMeta::new(*associated_bonding_curve, false),     // 4
-        AccountMeta::new(*associated_user, false),              // 5
-        AccountMeta::new(*user, true),                          // 6
-        AccountMeta::new_readonly(*system_program, false),      // 7
-        AccountMeta::new(*creator_vault, false),                // 8
-        AccountMeta::new_readonly(*token_program, false),       // 9
-        AccountMeta::new_readonly(*event_authority, false),     // 10
-        AccountMeta::new_readonly(PUMP_FUN_PROGRAM_ID, false),  // 11
-        AccountMeta::new_readonly(*fee_config, false),          // 12
-        AccountMeta::new_readonly(FEE_PROGRAM_ID, false),       // 13
-        AccountMeta::new_readonly(*bonding_curve_v2, false),    // 14
+        AccountMeta::new_readonly(*global, false),             // 0
+        AccountMeta::new(*fee_recipient, false),               // 1
+        AccountMeta::new_readonly(*mint, false),               // 2
+        AccountMeta::new(*bonding_curve, false),               // 3
+        AccountMeta::new(*associated_bonding_curve, false),    // 4
+        AccountMeta::new(*associated_user, false),             // 5
+        AccountMeta::new(*user, true),                         // 6
+        AccountMeta::new_readonly(*system_program, false),     // 7
+        AccountMeta::new(*creator_vault, false),               // 8
+        AccountMeta::new_readonly(*token_program, false),      // 9
+        AccountMeta::new_readonly(*event_authority, false),    // 10
+        AccountMeta::new_readonly(PUMP_FUN_PROGRAM_ID, false), // 11
+        AccountMeta::new_readonly(*fee_config, false),         // 12
+        AccountMeta::new_readonly(FEE_PROGRAM_ID, false),      // 13
+        AccountMeta::new_readonly(*bonding_curve_v2, false),   // 14
     ];
 
     Instruction {
@@ -287,4 +274,44 @@ pub fn build_create_v2_instruction(
         accounts,
         data,
     }
+}
+
+/// Read the current price from a Pump.fun v2 bonding curve account.
+/// Returns price in lamports per 1M tokens (matching LaunchVaultState::entry_price format).
+///
+/// Bonding curve v2 layout (Anchor):
+///   offset  0..8   = discriminator
+///   offset  8..16  = virtual_token_reserves (u64)
+///   offset 16..24  = virtual_sol_reserves   (u64)
+pub fn read_bonding_curve_price(account_info: &anchor_lang::prelude::AccountInfo) -> anchor_lang::Result<u64> {
+    let data = account_info.try_borrow_data()?;
+    require!(
+        data.len() >= 24,
+        crate::errors::LaunchVaultError::InvalidBondingCurveData
+    );
+
+    let virtual_token_reserves = u64::from_le_bytes(
+        data[8..16]
+            .try_into()
+            .map_err(|_| anchor_lang::error!(crate::errors::LaunchVaultError::InvalidBondingCurveData))?,
+    );
+
+    let virtual_sol_reserves = u64::from_le_bytes(
+        data[16..24]
+            .try_into()
+            .map_err(|_| anchor_lang::error!(crate::errors::LaunchVaultError::InvalidBondingCurveData))?,
+    );
+
+    require!(
+        virtual_token_reserves > 0,
+        crate::errors::LaunchVaultError::InvalidBondingCurveData
+    );
+
+    let price = (virtual_sol_reserves as u128)
+        .checked_mul(1_000_000)
+        .ok_or(crate::errors::LaunchVaultError::ArithmeticOverflow)?
+        .checked_div(virtual_token_reserves as u128)
+        .ok_or(crate::errors::LaunchVaultError::ArithmeticOverflow)? as u64;
+
+    Ok(price)
 }

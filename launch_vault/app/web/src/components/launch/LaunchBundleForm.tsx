@@ -49,6 +49,7 @@ export function LaunchBundleForm() {
   // Step 2: Position config
   const [lpAllocation, setLpAllocation] = useState("");
   const [userContribution, setUserContribution] = useState("");
+  const [stopLossPercent, setStopLossPercent] = useState<number>(0);
 
   // Step 3: Buyers
   const [buyers, setBuyers] = useState<BuyerEntry[]>([
@@ -76,13 +77,13 @@ export function LaunchBundleForm() {
   // Computed values
   const lpSol = parseFloat(lpAllocation) || 0;
   const contribSol = parseFloat(userContribution) || 0;
-  const fixedFee = config ? Number((config as any).fixedFee) / LAMPORTS_PER_SOL : 0;
-  const feeBps = config ? Number((config as any).feeBps) : 0;
+  const fixedFee = config?.data ? Number(config.data.fixedFee) / LAMPORTS_PER_SOL : 0;
+  const feeBps = config?.data ? Number(config.data.feeBps) : 0;
   const percentFee = (lpSol * feeBps) / 10000;
   const totalFee = fixedFee + percentFee;
   const totalBuyBudget = lpSol + contribSol;
   const totalMaxSol = buyers.reduce((sum, b) => sum + (parseFloat(b.maxSolCost) || 0), 0);
-  const availableLp = pool ? Number((pool as any).availableLiquidity) / LAMPORTS_PER_SOL : 0;
+  const availableLp = pool?.data ? Number(pool.data.availableLiquidity) / LAMPORTS_PER_SOL : 0;
 
   // Cleanup Object URL on unmount or when preview changes
   const prevPreviewRef = useRef<string | null>(null);
@@ -197,7 +198,7 @@ export function LaunchBundleForm() {
 
     setLoading(true);
     try {
-      const buyAmounts = buyers.map(b => new BN(parseInt(b.tokenAmount)));
+      const buyAmounts = buyers.map(b => new BN(parseInt(b.tokenAmount)).mul(new BN(1_000_000)));
       const maxSolCosts = buyers.map(b => new BN(Math.round(parseFloat(b.maxSolCost) * LAMPORTS_PER_SOL)));
 
       const { vtx, mint, vaultPDA, blockhash, lastValidBlockHeight } = await buildOpenPosition(
@@ -214,6 +215,7 @@ export function LaunchBundleForm() {
           buyAmounts,
           maxSolCosts,
           altAddress: altAddress || undefined,
+          stopLossBps: Math.round(Math.min(Math.max(stopLossPercent, 0), 99) * 100), // Convert % to basis points, clamp 0-99
         }
       );
 
@@ -402,6 +404,13 @@ export function LaunchBundleForm() {
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500" />
             </div>
           </div>
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Stop-Loss (% of entry price)</label>
+            <input type="number" step="1" min="0" max="99" value={stopLossPercent}
+              onChange={(e) => setStopLossPercent(Number(e.target.value))} placeholder="0"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500" />
+            <p className="text-xs text-gray-500 mt-1">0 = no stop-loss, 50 = sell at 50% of entry</p>
+          </div>
           <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-3 text-sm space-y-1">
             <p className="text-gray-400">Total buy budget: <span className="text-white">{totalBuyBudget.toFixed(4)} SOL</span></p>
             <p className="text-gray-400">Fixed fee: <span className="text-white">{fixedFee.toFixed(6)} SOL</span></p>
@@ -438,10 +447,10 @@ export function LaunchBundleForm() {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Token Amount (raw)</label>
+                  <label className="block text-xs text-gray-500 mb-1">Token Amount</label>
                   <input type="number" min="0" value={buyer.tokenAmount}
                     onChange={(e) => updateBuyer(idx, "tokenAmount", e.target.value)}
-                    placeholder="1000000"
+                    placeholder="1000000000"
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 text-sm focus:outline-none focus:border-violet-500" />
                 </div>
                 <div>
@@ -485,6 +494,7 @@ export function LaunchBundleForm() {
             <h3 className="text-white font-medium mb-2">Position</h3>
             <p className="text-gray-400">LP Allocation: <span className="text-white">{lpSol} SOL</span></p>
             <p className="text-gray-400">User Contribution: <span className="text-white">{contribSol} SOL</span></p>
+            {stopLossPercent > 0 && <p className="text-gray-400">Stop-Loss: <span className="text-white">{stopLossPercent}%</span></p>}
             <p className="text-gray-400">Fees: <span className="text-white">{totalFee.toFixed(6)} SOL</span></p>
             <p className="text-gray-400">Total cost: <span className="text-yellow-400">{(contribSol + totalFee).toFixed(6)} SOL</span></p>
           </div>

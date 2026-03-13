@@ -100,4 +100,58 @@ pub enum LaunchVaultError {
 
     #[msg("Minimum SOL output not met")]
     SlippageExceeded,
+
+    #[msg("User contribution below minimum required")]
+    UserContributionTooLow,
+
+    #[msg("LP allocation exceeds maximum allowed")]
+    LpAllocationTooHigh,
+
+    #[msg("User contribution ratio below minimum required")]
+    InsufficientUserRatio,
+
+    #[msg("Stop-loss not configured for this position")]
+    StopLossNotConfigured,
+
+    #[msg("Stop-loss already triggered")]
+    StopLossAlreadyTriggered,
+
+    #[msg("Stop-loss condition not met (price above threshold)")]
+    StopLossConditionNotMet,
+
+    #[msg("Circuit breaker triggered — too many positions or cooldown active")]
+    CircuitBreakerTriggered,
+
+    #[msg("Insurance fund withdrawal would exceed minimum balance")]
+    InsuranceFundBelowMinimum,
+
+    #[msg("Invalid insurance fund authority")]
+    InvalidInsuranceFundAuthority,
+
+    #[msg("Insurance fund amount must be greater than zero")]
+    ZeroInsuranceFundAmount,
+
+    #[msg("Cannot resume protocol — circuit breaker still in cooldown")]
+    CircuitBreakerInCooldown,
+
+    #[msg("Only admin or executor can pause protocol")]
+    UnauthorizedPauser,
+
+    #[msg("Invalid circuit breaker parameter")]
+    InvalidCircuitBreakerParam,
+
+    #[msg("Stop-loss basis points must be 0 or less than 10000")]
+    InvalidStopLossParam,
+
+    #[msg("Protocol is not paused")]
+    ProtocolNotPaused,
+
+    #[msg("Invalid PumpFun fee program")]
+    InvalidPumpFeeProgram,
+
+    #[msg("Invalid bonding curve account data")]
+    InvalidBondingCurveData,
+
+    #[msg("Invalid token program — expected Token2022")]
+    InvalidTokenProgram,
 }

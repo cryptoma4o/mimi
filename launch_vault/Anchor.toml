@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-launch_vault = "oNm4QmXFFUXYSYvDkMxW7azSihrViER4Qr1pAUnPvYg"
+launch_vault = { address = "oNm4QmXFFUXYSYvDkMxW7azSihrViER4Qr1pAUnPvYg", max_size = 600000 }
 
 [programs.localnet]
 launch_vault = "DLGVvhWfYECCNfzbEuxPxckbSYAyMBnEa7Q4WvxHv813"

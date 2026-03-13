@@ -96,6 +96,9 @@ pub struct ForceClosePosition<'info> {
     pub system_program: Program<'info, System>,
 
     /// CHECK: Token2022 program
+    #[account(
+        constraint = token_program.key() == crate::cpi::token_utils::TOKEN_2022_PROGRAM_ID @ LaunchVaultError::InvalidTokenProgram,
+    )]
     pub token_program: UncheckedAccount<'info>,
 }
 
@@ -108,12 +111,7 @@ pub fn handler(ctx: Context<ForceClosePosition>) -> Result<()> {
     let mint_key = vault.token_mint;
     let bump = vault.bump;
     let vault_pda = ctx.accounts.vault_state.key();
-    let vault_seeds: &[&[u8]] = &[
-        b"vault",
-        user_key.as_ref(),
-        mint_key.as_ref(),
-        &[bump],
-    ];
+    let vault_seeds: &[&[u8]] = &[b"vault", user_key.as_ref(), mint_key.as_ref(), &[bump]];
 
     // Record vault lamports before sell to calculate SOL received
     let vault_lamports_before = ctx.accounts.vault_state.to_account_info().lamports();
@@ -172,8 +170,16 @@ pub fn handler(ctx: Context<ForceClosePosition>) -> Result<()> {
     let sol_to_pool = transferable.min(sol_recovered);
 
     if sol_to_pool > 0 {
-        **ctx.accounts.vault_state.to_account_info().try_borrow_mut_lamports()? -= sol_to_pool;
-        **ctx.accounts.lp_pool.to_account_info().try_borrow_mut_lamports()? += sol_to_pool;
+        **ctx
+            .accounts
+            .vault_state
+            .to_account_info()
+            .try_borrow_mut_lamports()? -= sol_to_pool;
+        **ctx
+            .accounts
+            .lp_pool
+            .to_account_info()
+            .try_borrow_mut_lamports()? += sol_to_pool;
     }
 
     // Calculate LP loss

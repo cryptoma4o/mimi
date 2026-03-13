@@ -2,9 +2,9 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
 
 use crate::cpi::token_utils::{build_close_account_instruction, TOKEN_2022_PROGRAM_ID};
-use crate::state::*;
 use crate::errors::LaunchVaultError;
 use crate::events::PositionClosedEvent;
+use crate::state::*;
 
 #[derive(Accounts)]
 pub struct ClosePosition<'info> {
@@ -149,12 +149,7 @@ pub fn handler(ctx: Context<ClosePosition>) -> Result<()> {
     let user_key = ctx.accounts.vault_state.user;
     let mint_key = ctx.accounts.vault_state.token_mint;
     let bump = ctx.accounts.vault_state.bump;
-    let vault_seeds: &[&[u8]] = &[
-        b"vault",
-        user_key.as_ref(),
-        mint_key.as_ref(),
-        &[bump],
-    ];
+    let vault_seeds: &[&[u8]] = &[b"vault", user_key.as_ref(), mint_key.as_ref(), &[bump]];
 
     let close_ix = build_close_account_instruction(
         &ctx.accounts.token_program.key(),

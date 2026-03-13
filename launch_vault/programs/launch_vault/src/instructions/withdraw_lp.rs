@@ -2,9 +2,9 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
 
 use crate::cpi::token_utils::build_burn_instruction;
-use crate::state::LpPool;
 use crate::errors::LaunchVaultError;
 use crate::events::LpWithdrawnEvent;
+use crate::state::LpPool;
 
 #[derive(Accounts)]
 pub struct WithdrawLp<'info> {
@@ -39,7 +39,10 @@ pub fn handler(ctx: Context<WithdrawLp>, lp_amount: u64) -> Result<()> {
     require!(lp_amount > 0, LaunchVaultError::ZeroWithdrawAmount);
 
     let lp_pool = &ctx.accounts.lp_pool;
-    require!(lp_pool.lp_mint_supply > 0, LaunchVaultError::InvalidLpTokenAmount);
+    require!(
+        lp_pool.lp_mint_supply > 0,
+        LaunchVaultError::InvalidLpTokenAmount
+    );
 
     // Calculate SOL to return based on LP token share
     let sol_out = (lp_amount as u128)
@@ -85,7 +88,11 @@ pub fn handler(ctx: Context<WithdrawLp>, lp_amount: u64) -> Result<()> {
 
     // Transfer SOL from LP pool PDA to withdrawer
     **lp_pool_info.try_borrow_mut_lamports()? -= sol_out;
-    **ctx.accounts.withdrawer.to_account_info().try_borrow_mut_lamports()? += sol_out;
+    **ctx
+        .accounts
+        .withdrawer
+        .to_account_info()
+        .try_borrow_mut_lamports()? += sol_out;
 
     // Update pool state
     let lp_pool = &mut ctx.accounts.lp_pool;

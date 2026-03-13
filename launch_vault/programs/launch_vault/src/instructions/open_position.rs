@@ -11,7 +11,7 @@ use crate::cpi::token_utils::{
     build_transfer_checked_instruction,
 };
 use crate::errors::LaunchVaultError;
-use crate::events::{InsuranceFundUpdatedEvent, PositionOpenedEvent};
+use crate::events::{CircuitBreakerTriggeredEvent, InsuranceFundUpdatedEvent, PositionOpenedEvent};
 use crate::state::*;
 
 const MAX_BUYERS: usize = pump_fun::MAX_BUYERS;
@@ -31,6 +31,7 @@ pub struct OpenPosition<'info> {
     pub vault_state: UncheckedAccount<'info>,
 
     #[account(
+        mut,
         seeds = [b"protocol_config"],
         bump = protocol_config.bump,
         constraint = protocol_config.status == ProtocolStatus::Active @ LaunchVaultError::ProtocolPaused,
@@ -132,7 +133,6 @@ pub struct OpenPosition<'info> {
     pub associated_token_program: Program<'info, AssociatedToken>,
 
     pub rent: Sysvar<'info, Rent>,
-
     // === remaining_accounts ===
     // [vault_token_account, buyer_0_pda, buyer_0_ata, buyer_0_vol, ...]
 }
@@ -147,14 +147,49 @@ pub fn handler<'info>(
     user_contribution: u64,
     buy_amounts: Vec<u64>,
     max_sol_costs: Vec<u64>,
+    stop_loss_bps: u16,
 ) -> Result<()> {
     // === Validation ===
     let num_buyers = buy_amounts.len();
     require!(num_buyers > 0, LaunchVaultError::NoBuyers);
-    require!(num_buyers <= MAX_BUYERS, LaunchVaultError::MaxBuyersExceeded);
-    require!(buy_amounts.len() == max_sol_costs.len(), LaunchVaultError::BuyParamsMismatch);
+    require!(
+        num_buyers <= MAX_BUYERS,
+        LaunchVaultError::MaxBuyersExceeded
+    );
+    require!(
+        buy_amounts.len() == max_sol_costs.len(),
+        LaunchVaultError::BuyParamsMismatch
+    );
     require!(lp_allocation > 0, LaunchVaultError::ZeroLpAllocation);
-    require!(user_contribution > 0, LaunchVaultError::ZeroUserContribution);
+    require!(
+        user_contribution > 0,
+        LaunchVaultError::ZeroUserContribution
+    );
+    require!(
+        stop_loss_bps == 0 || stop_loss_bps < 10_000,
+        LaunchVaultError::InvalidStopLossParam
+    );
+
+    // Guardrails: validate user_contribution and lp_allocation
+    require!(
+        user_contribution >= ctx.accounts.protocol_config.min_user_contribution,
+        LaunchVaultError::UserContributionTooLow
+    );
+    require!(
+        lp_allocation <= ctx.accounts.protocol_config.max_lp_per_position,
+        LaunchVaultError::LpAllocationTooHigh
+    );
+    let user_ratio_bps_raw = (user_contribution as u128)
+        .checked_mul(10_000)
+        .ok_or(LaunchVaultError::ArithmeticOverflow)?
+        .checked_div(lp_allocation as u128)
+        .ok_or(LaunchVaultError::ArithmeticOverflow)?;
+    // Compare in u128 to avoid u16 overflow when user_contribution >> lp_allocation
+    require!(
+        user_ratio_bps_raw >= ctx.accounts.protocol_config.min_user_ratio_bps as u128,
+        LaunchVaultError::InsufficientUserRatio
+    );
+
     require!(
         lp_allocation <= ctx.accounts.lp_pool.available_liquidity,
         LaunchVaultError::InsufficientLpLiquidity
@@ -193,12 +228,58 @@ pub fn handler<'info>(
         .checked_add(user_contribution)
         .ok_or(LaunchVaultError::ArithmeticOverflow)?;
 
-    require!(total_max_sol <= buy_budget, LaunchVaultError::BudgetExceeded);
+    require!(
+        total_max_sol <= buy_budget,
+        LaunchVaultError::BudgetExceeded
+    );
+
+    // ========================================================
+    // Circuit Breaker Check (after input validation)
+    // ========================================================
+    let clock = Clock::get()?;
+    let config = &mut ctx.accounts.protocol_config;
+    let now = clock.unix_timestamp;
+
+    // Only run circuit breaker logic when a position limit is configured
+    if config.cb_position_limit > 0 {
+        if config.cb_last_trigger > 0
+            && now
+                < config
+                    .cb_last_trigger
+                    .checked_add(config.cb_cooldown_seconds)
+                    .ok_or(LaunchVaultError::ArithmeticOverflow)?
+        {
+            return err!(LaunchVaultError::CircuitBreakerTriggered);
+        }
+
+        if now >= config.cb_window_start
+            .checked_add(config.cb_window_seconds)
+            .ok_or(LaunchVaultError::ArithmeticOverflow)?
+        {
+            config.cb_window_start = now;
+            config.cb_positions_in_window = 0;
+        }
+
+        if config.cb_positions_in_window >= config.cb_position_limit {
+            config.cb_last_trigger = now;
+            config.status = ProtocolStatus::Paused;
+            emit!(CircuitBreakerTriggeredEvent {
+                positions_in_window: config.cb_positions_in_window,
+                window_limit: config.cb_position_limit,
+                timestamp: now,
+            });
+            return err!(LaunchVaultError::CircuitBreakerTriggered);
+        }
+
+        config.cb_positions_in_window = config
+            .cb_positions_in_window
+            .checked_add(1)
+            .ok_or(LaunchVaultError::ArithmeticOverflow)?;
+    }
 
     // ========================================================
     // STEP 1: Calculate and pay upfront fees
     // ========================================================
-    let config = &ctx.accounts.protocol_config;
     let percentage_fee = (lp_allocation as u128)
         .checked_mul(config.fee_bps as u128)
         .ok_or(LaunchVaultError::ArithmeticOverflow)?
@@ -493,7 +574,9 @@ pub fn handler<'info>(
                 ctx.accounts.pump_creator_vault.to_account_info(),
                 ctx.accounts.pump_event_authority.to_account_info(),
                 ctx.accounts.pump_program.to_account_info(),
-                ctx.accounts.pump_global_volume_accumulator.to_account_info(),
+                ctx.accounts
+                    .pump_global_volume_accumulator
+                    .to_account_info(),
                 buyer_vol_info.clone(),
                 ctx.accounts.pump_fee_config.to_account_info(),
                 ctx.accounts.pump_fee_program.to_account_info(),
@@ -559,11 +642,7 @@ pub fn handler<'info>(
                 .ok_or(LaunchVaultError::ArithmeticOverflow)?;
 
             invoke_signed(
-                &system_instruction::transfer(
-                    &expected_buyer_pda,
-                    &user_key,
-                    buyer_lamports,
-                ),
+                &system_instruction::transfer(&expected_buyer_pda, &user_key, buyer_lamports),
                 &[
                     buyer_pda_info.clone(),
                     ctx.accounts.user.to_account_info(),
@@ -582,8 +661,16 @@ pub fn handler<'info>(
     // User fronted all SOL; pool repays min(total_sol_spent, lp_allocation).
     let pool_share = total_sol_spent.min(lp_allocation);
     if pool_share > 0 {
-        **ctx.accounts.lp_pool.to_account_info().try_borrow_mut_lamports()? -= pool_share;
-        **ctx.accounts.user.to_account_info().try_borrow_mut_lamports()? += pool_share;
+        **ctx
+            .accounts
+            .lp_pool
+            .to_account_info()
+            .try_borrow_mut_lamports()? -= pool_share;
+        **ctx
+            .accounts
+            .user
+            .to_account_info()
+            .try_borrow_mut_lamports()? += pool_share;
     }
 
     // Adjust reservation to actual deployment: if buys cost less than
@@ -605,6 +692,16 @@ pub fn handler<'info>(
     // ========================================================
     // STEP 7: Write vault state
     // ========================================================
+    let entry_price = if total_tokens_bought > 0 {
+        (total_sol_spent as u128)
+            .checked_mul(1_000_000)
+            .ok_or(LaunchVaultError::ArithmeticOverflow)?
+            .checked_div(total_tokens_bought as u128)
+            .ok_or(LaunchVaultError::ArithmeticOverflow)? as u64
+    } else {
+        0
+    };
+
     let vault_data = LaunchVaultState {
         user: user_key,
         token_mint: mint_key,
@@ -617,6 +714,10 @@ pub fn handler<'info>(
         open_timestamp: clock.unix_timestamp,
         fee_paid: total_fee,
         num_sub_wallets: num_buyers as u8,
+        entry_price,
+        stop_loss_bps,
+        stop_loss_triggered: false,
+        stop_loss_timestamp: 0,
         bump: vault_bump,
     };
 

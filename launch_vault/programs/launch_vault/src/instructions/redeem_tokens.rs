@@ -3,9 +3,9 @@ use anchor_lang::solana_program::program::invoke_signed;
 use anchor_lang::system_program;
 
 use crate::cpi::token_utils::build_transfer_checked_instruction;
-use crate::state::*;
 use crate::errors::LaunchVaultError;
 use crate::events::TokensRedeemedEvent;
+use crate::state::*;
 
 #[derive(Accounts)]
 pub struct RedeemTokens<'info> {
@@ -76,6 +76,7 @@ pub fn handler(ctx: Context<RedeemTokens>, amount: u64) -> Result<()> {
         amount <= vault.remaining_token_amount,
         LaunchVaultError::RedeemAmountExceedsRemaining
     );
+    require!(vault.remaining_token_amount > 0, LaunchVaultError::ZeroRedeemAmount);
 
     // Calculate proportional LP to return
     let proportional_lp = (amount as u128)
@@ -151,12 +152,7 @@ pub fn handler(ctx: Context<RedeemTokens>, amount: u64) -> Result<()> {
     let user_key = ctx.accounts.user.key();
     let mint_key = ctx.accounts.vault_state.token_mint;
     let bump = ctx.accounts.vault_state.bump;
-    let vault_seeds: &[&[u8]] = &[
-        b"vault",
-        user_key.as_ref(),
-        mint_key.as_ref(),
-        &[bump],
-    ];
+    let vault_seeds: &[&[u8]] = &[b"vault", user_key.as_ref(), mint_key.as_ref(), &[bump]];
 
     let transfer_ix = build_transfer_checked_instruction(
         &ctx.accounts.token_program.key(),

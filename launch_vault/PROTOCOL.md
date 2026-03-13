@@ -26,6 +26,12 @@ Solana-программа (Anchor 0.32.1) — протокол ликвидно�
   - [redeem_tokens](#8-redeem_tokens)
   - [close_position](#9-close_position)
   - [force_close_position](#10-force_close_position)
+  - [trigger_stop_loss](#11-trigger_stop_loss)
+  - [deposit_insurance_fund](#12-deposit_insurance_fund)
+  - [withdraw_insurance_fund](#13-withdraw_insurance_fund)
+  - [pause_protocol](#14-pause_protocol)
+  - [resume_protocol](#15-resume_protocol)
+  - [migrate_protocol](#16-migrate_protocol)
 - [CPI к Pump.fun v2](#cpi-к-pumpfun-v2)
 - [CPI Token2022 (token_utils)](#cpi-token2022-token_utils)
 - [SOL Flow](#sol-flow)
@@ -62,6 +68,9 @@ LaunchVault предоставляет **заёмную ликвидность**
 - **Permissionless close** — после timeout любой может закрыть позицию за награду
 - **Force close** — executor может экстренно продать все токены
 - **Utilization cap** — ограничение % использования LP пула
+- **Stop-loss** — автоматическая продажа при падении цены ниже threshold (executor bot)
+- **Circuit breaker** — rate limiting позиций + manual pause/resume
+- **Position limits** — min user contribution, max LP per position, min user/lp ratio
 
 ---
 
@@ -93,11 +102,11 @@ LaunchVault предоставляет **заёмную ликвидность**
 
 | Роль | Описание | Доступные инструкции |
 |------|----------|---------------------|
-| **Admin** | Создатель протокола, управляет конфигурацией | `initialize_protocol`, `update_protocol_config` |
-| **Executor** | Доверенный оператор для исполнения buy CPI и экстренных закрытий | `open_position` (подписывает buy CPI), `sell_position` (как keeper), `force_close_position` |
+| **Admin** | Создатель протокола, управляет конфигурацией | `initialize_protocol`, `update_protocol_config`, `migrate_protocol`, `pause_protocol`, `resume_protocol`, `withdraw_insurance_fund` |
+| **Executor** | Доверенный оператор для исполнения и экстренных операций | `sell_position` (как keeper), `force_close_position`, `trigger_stop_loss`, `pause_protocol` |
 | **User** | Создатель позиции, владелец vault | `open_position`, `sell_position` (свой vault), `redeem_tokens`, `close_position` (свой vault) |
 | **LP Provider** | Поставщик ликвидности | `deposit_lp`, `withdraw_lp` |
-| **Anyone** | Любой пользователь | `close_position` (после timeout — permissionless close) |
+| **Anyone** | Любой пользователь | `close_position` (после timeout), `deposit_insurance_fund`, `proxy_create_token` |
 
 ---
 
@@ -119,7 +128,17 @@ Seed: `[b"protocol_config"]`
 | `close_reward_bps` | `u16` | Награда за permissionless close (basis points от remaining LP) |
 | `insurance_split_bps` | `u16` | Доля комиссий в страховой фонд (basis points, 2000 = 20%) |
 | `redemption_fee_bps` | `u16` | Комиссия при redeem (basis points, 10000 = 100%) |
+| `min_user_contribution` | `u64` | Минимальный user contribution за позицию (lamports) |
+| `max_lp_per_position` | `u64` | Максимальный LP allocation за позицию (lamports) |
+| `min_user_ratio_bps` | `u16` | Мин. соотношение user_contribution/lp_allocation (basis points, 2000 = 20%) |
 | `status` | `ProtocolStatus` | Статус протокола: `Active` / `Paused` |
+| `cb_position_limit` | `u32` | Circuit breaker: макс. позиций за окно (0 = отключён) |
+| `cb_window_seconds` | `i64` | Circuit breaker: длительность окна в секундах |
+| `cb_cooldown_seconds` | `i64` | Circuit breaker: cooldown после срабатывания |
+| `cb_window_start` | `i64` | Circuit breaker: начало текущего окна (timestamp) |
+| `cb_positions_in_window` | `u32` | Circuit breaker: позиций открыто в текущем окне |
+| `cb_last_trigger` | `i64` | Circuit breaker: timestamp последнего срабатывания |
+| `min_insurance_fund` | `u64` | Минимальный баланс insurance fund (guard для withdrawals) |
 | `bump` | `u8` | PDA bump |
 
 ### LpPool
@@ -155,6 +174,10 @@ Seed: `[b"vault", user.key(), mint.key()]`
 | `open_timestamp` | `i64` | Unix timestamp открытия позиции |
 | `fee_paid` | `u64` | Уплаченная upfront fee (lamports) |
 | `num_sub_wallets` | `u8` | Количество buyer PDA, использованных при покупке |
+| `entry_price` | `u64` | Цена при открытии позиции (lamports per 1M tokens) |
+| `stop_loss_bps` | `u16` | Stop-loss threshold (basis points, 0 = отключён) |
+| `stop_loss_triggered` | `bool` | Был ли stop-loss уже исполнен |
+| `stop_loss_timestamp` | `i64` | Timestamp срабатывания stop-loss |
 | `bump` | `u8` | PDA bump |
 
 ### InsuranceFund
@@ -280,6 +303,9 @@ lp_token_price = total_liquidity * 1_000_000_000 / lp_mint_supply   // 9 decimal
 | `close_reward_bps` | `u16` | Награда за close (basis points, ≤ 10000) |
 | `insurance_split_bps` | `u16` | Доля в insurance (basis points, ≤ 10000) |
 | `redemption_fee_bps` | `u16` | Комиссия redeem (basis points, ≤ 10000) |
+| `min_user_contribution` | `u64` | Мин. user contribution за позицию (lamports) |
+| `max_lp_per_position` | `u64` | Макс. LP allocation за позицию (lamports) |
+| `min_user_ratio_bps` | `u16` | Мин. ratio user/lp (basis points) |
 
 **Аккаунты:**
 
@@ -324,7 +350,10 @@ lp_token_price = total_liquidity * 1_000_000_000 / lp_mint_supply   // 9 decimal
 | `new_insurance_split_bps` | `Option<u16>` | Новая доля insurance |
 | `new_redemption_fee_bps` | `Option<u16>` | Новая комиссия redeem |
 | `new_admin` | `Option<Pubkey>` | Новый admin (transfer ownership) |
-| `new_status` | `Option<ProtocolStatus>` | Новый статус (Active/Paused) |
+| `new_cb_position_limit` | `Option<u32>` | Circuit breaker: макс. позиций за окно |
+| `new_cb_window_seconds` | `Option<i64>` | Circuit breaker: длительность окна |
+| `new_cb_cooldown_seconds` | `Option<i64>` | Circuit breaker: cooldown |
+| `new_min_insurance_fund` | `Option<u64>` | Мин. баланс insurance fund |
 
 **Аккаунты:**
 
@@ -471,6 +500,7 @@ lp_token_price = total_liquidity * 1_000_000_000 / lp_mint_supply   // 9 decimal
 | `user_contribution` | `u64` | Собственный SOL пользователя (lamports, > 0) |
 | `buy_amounts` | `Vec<u64>` | Количество токенов для каждого buyer (1–5 элементов) |
 | `max_sol_costs` | `Vec<u64>` | Max SOL для каждого buyer |
+| `stop_loss_bps` | `u16` | Stop-loss threshold (basis points, 0 = отключён, e.g. 2000 = продать если цена упала на 20%) |
 
 **Аккаунты (именованные):**
 
@@ -719,6 +749,213 @@ lp_token_price = total_liquidity * 1_000_000_000 / lp_mint_supply   // 9 decimal
 
 ---
 
+### 11. trigger_stop_loss
+
+Автоматическая продажа всех оставшихся токенов при падении цены ниже stop-loss threshold.
+
+**Доступ:** Executor only (keeper bot)
+
+**Аргументы:**
+
+| Аргумент | Тип | Описание |
+|----------|-----|----------|
+| `amount` | `u64` | Количество токенов (игнорируется — всегда продаются все remaining) |
+| `min_sol_output` | `u64` | Минимальный SOL от продажи (slippage protection) |
+
+**Аккаунты:**
+
+| # | Аккаунт | Тип | Описание |
+|---|---------|-----|----------|
+| 0 | `signer` | Signer, mut | protocol_config.executor |
+| 1 | `vault` | PDA, mut | Seed: `[b"vault", user, mint]`, status == Active, stop_loss_bps > 0, !stop_loss_triggered |
+| 2 | `protocol_config` | PDA | status == Active |
+| 3 | `lp_pool` | PDA, mut | |
+| 4 | `token_mint` | UncheckedAccount | vault.token_mint |
+| 5 | `pump_program` | | Pump.fun program |
+| 6 | `pump_global` | mut | |
+| 7 | `pump_bonding_curve` | mut | |
+| 8 | `pump_associated_bonding_curve` | mut | |
+| 9 | `pump_event_authority` | | |
+| 10 | `pump_fee_recipient` | mut | |
+| 11 | `pump_creator_vault` | mut | |
+| 12 | `pump_fee_config` | | |
+| 13 | `pump_fee_program` | | Verified: `pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ` |
+| 14 | `pump_bonding_curve_v2` | | Verified: PDA seed derivation + owner check |
+| 15 | `token_program` | | Token2022 |
+| 16 | `system_program` | Program | |
+| 17 | `associated_token_program` | Program | |
+| 18 | `vault_token_account` | UncheckedAccount, mut | ATA vault PDA (Token2022) |
+
+**Логика:**
+1. Проверка: stop_loss_bps < 10000, entry_price > 0
+2. Чтение текущей цены из bonding_curve_v2 PDA: `current_price = read_bonding_curve_price()`
+3. Рассчёт threshold: `stop_loss_threshold = entry_price * (10000 - stop_loss_bps) / 10000`
+4. Проверка: `current_price <= stop_loss_threshold`
+5. CPI sell **всех** remaining tokens (vault PDA подписывает)
+6. `sol_received = vault_lamports_after - vault_lamports_before`
+7. `proportional_return = tokens_sold * remaining_lp / remaining_tokens`
+8. `sol_to_pool = min(sol_received, proportional_return)` → transfer vault → lp_pool
+9. Update lp_pool: reserved -= proportional_return, lp_loss учитывается
+10. Update vault: remaining_token_amount, remaining_lp_allocation
+11. **Всегда**: `stop_loss_triggered = true`, `stop_loss_timestamp = now` (one-shot, constraint не пропустит повторно)
+12. Если remaining_tokens == 0 → status = Closed
+13. Emit `StopLossTriggeredEvent` + `PositionSoldEvent`
+
+> **Важно:** Stop-loss всегда продаёт ВСЕ оставшиеся токены за одну транзакцию. Повторный вызов невозможен (constraint `!stop_loss_triggered`).
+
+---
+
+### 12. deposit_insurance_fund
+
+Депозит SOL в страховой фонд.
+
+**Доступ:** Permissionless — любой кошелёк может внести SOL в insurance fund.
+
+**Аргументы:**
+
+| Аргумент | Тип | Описание |
+|----------|-----|----------|
+| `amount` | `u64` | Сумма SOL для депозита (lamports, > 0) |
+
+**Аккаунты:**
+
+| # | Аккаунт | Тип | Описание |
+|---|---------|-----|----------|
+| 0 | `payer` | Signer, mut | Депозитор |
+| 1 | `insurance_fund` | PDA, mut | Seed: `[b"insurance_fund"]` |
+| 2 | `protocol_config` | PDA | |
+| 3 | `system_program` | Program | |
+
+**Логика:**
+1. Проверка: amount > 0
+2. Transfer SOL: payer → insurance_fund PDA (system_program::transfer)
+3. Update: insurance_fund.total_sol += amount
+4. Emit `InsuranceFundDepositedEvent`
+
+---
+
+### 13. withdraw_insurance_fund
+
+Вывод SOL из страхового фонда.
+
+**Доступ:** Admin only (insurance_fund.authority)
+
+**Аргументы:**
+
+| Аргумент | Тип | Описание |
+|----------|-----|----------|
+| `amount` | `u64` | Сумма SOL для вывода (lamports, > 0) |
+
+**Аккаунты:**
+
+| # | Аккаунт | Тип | Описание |
+|---|---------|-----|----------|
+| 0 | `admin` | Signer, mut | insurance_fund.authority |
+| 1 | `insurance_fund` | PDA, mut | Seed: `[b"insurance_fund"]` |
+| 2 | `protocol_config` | PDA | |
+| 3 | `destination` | SystemAccount, mut | Получатель SOL |
+| 4 | `system_program` | Program | |
+
+**Логика:**
+1. Проверка: amount > 0
+2. Проверка: insurance_fund.total_sol >= amount
+3. Проверка: `new_total >= protocol_config.min_insurance_fund` (guard)
+4. Transfer SOL: insurance_fund PDA → destination (прямой перенос lamports)
+5. Update: insurance_fund.total_sol -= amount
+6. Emit `InsuranceFundWithdrawnEvent`
+
+---
+
+### 14. pause_protocol
+
+Ручная пауза протокола (circuit breaker). Блокирует open_position.
+
+**Доступ:** Admin ИЛИ Executor
+
+**Аргументы:**
+
+| Аргумент | Тип | Описание |
+|----------|-----|----------|
+| `reason` | `String` | Причина паузы (max 200 символов) |
+
+**Аккаунты:**
+
+| # | Аккаунт | Тип | Описание |
+|---|---------|-----|----------|
+| 0 | `signer` | Signer, mut | Admin или executor |
+| 1 | `protocol_config` | PDA, mut | Seed: `[b"protocol_config"]` |
+
+**Логика:**
+1. Проверка: reason.len() ≤ 200
+2. Проверка: signer == admin ИЛИ signer == executor
+3. Проверка: protocol_config.status != Paused (нельзя паузить уже paused)
+4. Set: status = Paused
+5. Emit `ProtocolPausedEvent`
+
+---
+
+### 15. resume_protocol
+
+Возобновление протокола после паузы.
+
+**Доступ:** Admin only
+
+**Аккаунты:**
+
+| # | Аккаунт | Тип | Описание |
+|---|---------|-----|----------|
+| 0 | `admin` | Signer | protocol_config.admin |
+| 1 | `protocol_config` | PDA, mut | Seed: `[b"protocol_config"]` |
+
+**Логика:**
+1. Проверка: status == Paused
+2. Если cb_last_trigger > 0: проверка `now >= cb_last_trigger + cb_cooldown_seconds` (cooldown прошёл)
+3. Set: status = Active
+4. Reset circuit breaker window: cb_window_start = now, cb_positions_in_window = 0
+5. Emit `ProtocolResumedEvent`
+
+---
+
+### 16. migrate_protocol
+
+Одноразовая миграция: realloc ProtocolConfig PDA и remap data layout для Phase 1 полей.
+
+**Доступ:** Admin only
+
+**Аргументы:**
+
+| Аргумент | Тип | Описание |
+|----------|-----|----------|
+| `min_user_contribution` | `u64` | Мин. user contribution (lamports) |
+| `max_lp_per_position` | `u64` | Макс. LP allocation (lamports) |
+| `min_user_ratio_bps` | `u16` | Мин. ratio user/lp (basis points) |
+
+**Аккаунты:**
+
+| # | Аккаунт | Тип | Описание |
+|---|---------|-----|----------|
+| 0 | `admin` | Signer, mut | Stored admin из существующего аккаунта |
+| 1 | `protocol_config` | UncheckedAccount, mut | PDA verified manually |
+| 2 | `system_program` | Program | |
+
+**Логика:**
+1. Verify PDA seeds: `Pubkey::find_program_address([b"protocol_config"])`
+2. Verify owner: `config.owner == program_id`
+3. Read stored admin из raw data (offset 8..40), verify == signer
+4. Если current_len < target_len (198 bytes):
+   - Transfer дополнительный rent от admin
+   - Realloc аккаунт до target_len
+5. Remap data layout:
+   - Новые поля (min_user_contribution, max_lp, min_ratio) записываются в offset 130+
+   - status переносится из старой позиции (130) в новую (148)
+   - Circuit breaker поля = defaults (limit=0, window=86400, cooldown=3600)
+   - min_insurance_fund = 0
+   - bump перезаписывается в новую позицию (197)
+
+> **Важно:** Одноразовая операция. После миграции аккаунт уже в новом формате. OLD layout: 132 bytes, NEW layout: 198 bytes.
+
+---
+
 ## CPI к Pump.fun v2
 
 Program ID: `6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P`
@@ -935,30 +1172,33 @@ bonding_curve_v2:          PDA [b"bonding-curve-v2", mint] from PUMP_FUN_PROGRAM
                          ▼
                   ┌──────────────┐
                   │    Active     │
-                  └──┬───┬───┬───┘
-                     │   │   │
-        ┌────────────┘   │   └────────────┐
-        ▼                ▼                ▼
-  sell_position    redeem_tokens   force_close_position
-  (partial/full)   (partial/full)   (executor only)
-        │                │                │
-        │                │                ▼
-        │                │         ┌──────────┐
-        │                │         │  Closed   │
-        │ all sold       │ all     │(force)    │
-        ▼ redeemed       ▼        └─────┬─────┘
-  ┌──────────┐    ┌──────────┐          │
-  │  Closed   │    │  Closed   │         │
-  │(by sell)  │    │(by redeem)│         │
-  └─────┬─────┘    └─────┬─────┘         │
-        │                │               │
-        └────────┬───────┘               │
-                 │                       │
-                 ▼                       ▼
-          ┌──────────────┐        ┌──────────────┐
-          │close_position│        │close_position│
-          │ (by owner)   │        │ (by owner)   │
-          └──────────────┘        └──────────────┘
+                  └─┬──┬──┬──┬───┘
+                    │  │  │  │
+       ┌────────────┘  │  │  └──────────────┐
+       ▼               │  │                 ▼
+ sell_position         │  │          force_close_position
+ (partial/full)        │  │           (executor only)
+       │               │  │                 │
+       │               ▼  ▼                 ▼
+       │     redeem   trigger          ┌──────────┐
+       │     _tokens  _stop_loss       │  Closed   │
+       │    (partial  (executor,       │(force)    │
+       │     /full)    all tokens)     └─────┬─────┘
+       │        │           │                │
+       │ all    │ all       │ all             │
+       ▼ sold   ▼ redeemed ▼ sold            │
+ ┌──────────┐ ┌──────────┐ ┌──────────┐     │
+ │  Closed  │ │  Closed  │ │  Closed  │     │
+ │(by sell) │ │(by redm) │ │(stop-loss│     │
+ └────┬─────┘ └────┬─────┘ └────┬─────┘     │
+      │             │            │           │
+      └──────┬──────┘────────────┘           │
+             │                               │
+             ▼                               ▼
+      ┌──────────────┐              ┌──────────────┐
+      │close_position│              │close_position│
+      │ (by owner)   │              │ (by owner)   │
+      └──────────────┘              └──────────────┘
 
 
   === Permissionless path (timeout) ===
@@ -973,6 +1213,12 @@ bonding_curve_v2:          PDA [b"bonding-curve-v2", mint] from PUMP_FUN_PROGRAM
                                      rent → vault owner,
                                      close_reward → closer,
                                      remaining LP → loss)
+
+  === Stop-loss path ===
+
+  Active (stop_loss_bps > 0) ──── (price drops below threshold) ────►
+    trigger_stop_loss (executor) → sell all tokens → Closed
+    → stop_loss_triggered = true (one-shot, cannot repeat)
 ```
 
 ### Состояния vault
@@ -1022,6 +1268,23 @@ bonding_curve_v2:          PDA [b"bonding-curve-v2", mint] from PUMP_FUN_PROGRAM
 | 6030 | `InvalidLpTokenAmount` | Неверное количество LP токенов |
 | 6031 | `UnauthorizedSeller` | Только владелец vault или executor может продавать |
 | 6032 | `SlippageExceeded` | Минимальный SOL output не достигнут |
+| 6033 | `UserContributionTooLow` | User contribution ниже минимально допустимого |
+| 6034 | `LpAllocationTooHigh` | LP allocation превышает максимально допустимый |
+| 6035 | `InsufficientUserRatio` | Соотношение user_contribution/lp_allocation ниже минимума |
+| 6036 | `StopLossNotConfigured` | Stop-loss не настроен для данной позиции |
+| 6037 | `StopLossAlreadyTriggered` | Stop-loss уже был исполнен |
+| 6038 | `StopLossConditionNotMet` | Условие stop-loss не выполнено (цена выше threshold) |
+| 6039 | `CircuitBreakerTriggered` | Circuit breaker сработал — слишком много позиций или cooldown |
+| 6040 | `InsuranceFundBelowMinimum` | Withdrawal из insurance fund опустит баланс ниже минимума |
+| 6041 | `InvalidInsuranceFundAuthority` | Неверный authority для insurance fund |
+| 6042 | `ZeroInsuranceFundAmount` | Сумма insurance fund должна быть > 0 |
+| 6043 | `CircuitBreakerInCooldown` | Невозможно resume — circuit breaker ещё в cooldown |
+| 6044 | `UnauthorizedPauser` | Только admin или executor может паузить протокол |
+| 6045 | `InvalidCircuitBreakerParam` | Невалидный параметр circuit breaker |
+| 6046 | `InvalidStopLossParam` | Stop-loss basis points должны быть 0 или < 10000 |
+| 6047 | `ProtocolNotPaused` | Протокол не на паузе |
+| 6048 | `InvalidPumpFeeProgram` | Невалидная PumpFun fee program |
+| 6049 | `InvalidBondingCurveData` | Невалидные данные bonding curve |
 
 ---
 
@@ -1152,35 +1415,93 @@ bonding_curve_v2:          PDA [b"bonding-curve-v2", mint] from PUMP_FUN_PROGRAM
 | `amount_added` | `u64` |
 | `timestamp` | `i64` |
 
+### InsuranceFundDepositedEvent
+
+| Поле | Тип |
+|------|-----|
+| `amount` | `u64` |
+| `new_total` | `u64` |
+| `timestamp` | `i64` |
+
+### InsuranceFundWithdrawnEvent
+
+| Поле | Тип |
+|------|-----|
+| `amount` | `u64` |
+| `new_total` | `u64` |
+| `destination` | `Pubkey` |
+| `timestamp` | `i64` |
+
+### ProtocolPausedEvent
+
+| Поле | Тип |
+|------|-----|
+| `pauser` | `Pubkey` |
+| `reason` | `String` |
+| `timestamp` | `i64` |
+
+### ProtocolResumedEvent
+
+| Поле | Тип |
+|------|-----|
+| `resumer` | `Pubkey` |
+| `timestamp` | `i64` |
+
+### CircuitBreakerTriggeredEvent
+
+| Поле | Тип |
+|------|-----|
+| `positions_in_window` | `u32` |
+| `window_limit` | `u32` |
+| `timestamp` | `i64` |
+
+### StopLossTriggeredEvent
+
+| Поле | Тип |
+|------|-----|
+| `vault` | `Pubkey` |
+| `token_mint` | `Pubkey` |
+| `entry_price` | `u64` |
+| `trigger_price` | `u64` |
+| `tokens_sold` | `u64` |
+| `sol_received` | `u64` |
+| `timestamp` | `i64` |
+
 ---
 
 ## Структура файлов
 
 ```
 launch_vault/programs/launch_vault/src/
-├── lib.rs                          # Entrypoint: declare_id!, #[program] mod, 10 instructions
-├── errors.rs                       # LaunchVaultError enum (33 варианта)
-├── events.rs                       # 11 event structs
+├── lib.rs                          # Entrypoint: declare_id!, #[program] mod, 16 instructions
+├── errors.rs                       # LaunchVaultError enum (48 вариантов)
+├── events.rs                       # 17 event structs
 ├── state/
 │   ├── mod.rs                      # Re-exports
-│   ├── protocol_config.rs          # ProtocolConfig + ProtocolStatus enum
+│   ├── protocol_config.rs          # ProtocolConfig + ProtocolStatus enum (Phase 1: circuit breaker, position limits)
 │   ├── lp_pool.rs                  # LpPool
-│   ├── launch_vault_state.rs       # LaunchVaultState + VaultStatus enum
+│   ├── launch_vault_state.rs       # LaunchVaultState + VaultStatus enum (Phase 1: stop-loss fields)
 │   └── insurance_fund.rs           # InsuranceFund
 ├── instructions/
-│   ├── mod.rs                      # Re-exports
+│   ├── mod.rs                      # Re-exports (16 instructions)
 │   ├── initialize_protocol.rs      # InitializeProtocol accounts + handler
-│   ├── update_protocol_config.rs   # UpdateProtocolConfig accounts + handler
+│   ├── update_protocol_config.rs   # UpdateProtocolConfig accounts + handler (Phase 1: circuit breaker params)
+│   ├── migrate_protocol.rs         # MigrateProtocol: one-time realloc (132 → 198 bytes)
 │   ├── deposit_lp.rs               # DepositLp accounts + handler
 │   ├── withdraw_lp.rs              # WithdrawLp accounts + handler
 │   ├── proxy_create_token.rs       # ProxyCreateToken accounts + handler
-│   ├── open_position.rs            # OpenPosition accounts + handler (630 lines)
+│   ├── open_position.rs            # OpenPosition accounts + handler (Phase 1: stop_loss_bps arg)
 │   ├── sell_position.rs            # SellPosition accounts + handler
 │   ├── redeem_tokens.rs            # RedeemTokens accounts + handler
 │   ├── close_position.rs           # ClosePosition accounts + handler
-│   └── force_close_position.rs     # ForceClosePosition accounts + handler
+│   ├── force_close_position.rs     # ForceClosePosition accounts + handler
+│   ├── trigger_stop_loss.rs        # TriggerStopLoss: executor auto-sell on price drop
+│   ├── deposit_insurance_fund.rs   # DepositInsuranceFund: permissionless SOL deposit
+│   ├── withdraw_insurance_fund.rs  # WithdrawInsuranceFund: admin SOL withdrawal (min guard)
+│   ├── pause_protocol.rs           # PauseProtocol: admin/executor manual pause
+│   └── resume_protocol.rs          # ResumeProtocol: admin resume after cooldown
 └── cpi/
     ├── mod.rs                      # Re-exports
-    ├── pump_fun.rs                 # Pump.fun CPI builders (create_v2, buy, sell) + PDA derivation
+    ├── pump_fun.rs                 # Pump.fun CPI builders (create_v2, buy, sell) + PDA derivation + read_bonding_curve_price
     └── token_utils.rs              # Token2022 instruction builders + read_token_account_amount
 ```

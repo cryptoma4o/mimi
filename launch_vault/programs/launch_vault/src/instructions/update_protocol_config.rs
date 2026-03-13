@@ -1,8 +1,8 @@
 use anchor_lang::prelude::*;
 
-use crate::state::*;
 use crate::errors::LaunchVaultError;
 use crate::events::ProtocolConfigUpdatedEvent;
+use crate::state::*;
 
 #[derive(Accounts)]
 pub struct UpdateProtocolConfig<'info> {
@@ -31,7 +31,10 @@ pub fn handler(
     new_insurance_split_bps: Option<u16>,
     new_redemption_fee_bps: Option<u16>,
     new_admin: Option<Pubkey>,
-    new_status: Option<ProtocolStatus>,
+    new_cb_position_limit: Option<u32>,
+    new_cb_window_seconds: Option<i64>,
+    new_cb_cooldown_seconds: Option<i64>,
+    new_min_insurance_fund: Option<u64>,
 ) -> Result<()> {
     let config = &mut ctx.accounts.protocol_config;
 
@@ -49,11 +52,17 @@ pub fn handler(
         config.fee_bps = fee_bps;
     }
     if let Some(max_utilization_bps) = new_max_utilization_bps {
-        require!(max_utilization_bps > 0 && max_utilization_bps <= 10_000, LaunchVaultError::InvalidUtilizationBps);
+        require!(
+            max_utilization_bps > 0 && max_utilization_bps <= 10_000,
+            LaunchVaultError::InvalidUtilizationBps
+        );
         config.max_utilization_bps = max_utilization_bps;
     }
     if let Some(position_timeout) = new_position_timeout {
-        require!(position_timeout > 0, LaunchVaultError::InvalidPositionTimeout);
+        require!(
+            position_timeout >= 300,
+            LaunchVaultError::InvalidPositionTimeout
+        );
         config.position_timeout = position_timeout;
     }
     if let Some(close_reward_bps) = new_close_reward_bps {
@@ -61,18 +70,41 @@ pub fn handler(
         config.close_reward_bps = close_reward_bps;
     }
     if let Some(insurance_split_bps) = new_insurance_split_bps {
-        require!(insurance_split_bps <= 10_000, LaunchVaultError::InvalidFeeBps);
+        require!(
+            insurance_split_bps <= 10_000,
+            LaunchVaultError::InvalidFeeBps
+        );
         config.insurance_split_bps = insurance_split_bps;
     }
     if let Some(redemption_fee_bps) = new_redemption_fee_bps {
-        require!(redemption_fee_bps <= 10_000, LaunchVaultError::InvalidRedemptionFeeBps);
+        require!(
+            redemption_fee_bps <= 10_000,
+            LaunchVaultError::InvalidRedemptionFeeBps
+        );
         config.redemption_fee_bps = redemption_fee_bps;
     }
     if let Some(admin) = new_admin {
         config.admin = admin;
     }
-    if let Some(status) = new_status {
-        config.status = status;
+    if let Some(cb_position_limit) = new_cb_position_limit {
+        config.cb_position_limit = cb_position_limit;
+    }
+    if let Some(cb_window_seconds) = new_cb_window_seconds {
+        require!(
+            cb_window_seconds > 0,
+            LaunchVaultError::InvalidCircuitBreakerParam
+        );
+        config.cb_window_seconds = cb_window_seconds;
+    }
+    if let Some(cb_cooldown_seconds) = new_cb_cooldown_seconds {
+        require!(
+            cb_cooldown_seconds > 0,
+            LaunchVaultError::InvalidCircuitBreakerParam
+        );
+        config.cb_cooldown_seconds = cb_cooldown_seconds;
+    }
+    if let Some(min_insurance_fund) = new_min_insurance_fund {
+        config.min_insurance_fund = min_insurance_fund;
     }
 
     let clock = Clock::get()?;

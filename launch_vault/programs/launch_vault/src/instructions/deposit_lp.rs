@@ -2,15 +2,21 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
 use anchor_lang::system_program;
 
-use crate::cpi::token_utils::{build_mint_to_instruction, build_create_ata_idempotent_instruction};
-use crate::state::LpPool;
+use crate::cpi::token_utils::{build_create_ata_idempotent_instruction, build_mint_to_instruction};
 use crate::errors::LaunchVaultError;
 use crate::events::LpDepositedEvent;
+use crate::state::{LpPool, ProtocolConfig, ProtocolStatus};
 
 #[derive(Accounts)]
 pub struct DepositLp<'info> {
     #[account(mut)]
     pub depositor: Signer<'info>,
+
+    #[account(
+        seeds = [b"protocol_config"],
+        bump = protocol_config.bump,
+    )]
+    pub protocol_config: Account<'info, ProtocolConfig>,
 
     #[account(
         mut,
@@ -39,6 +45,10 @@ pub struct DepositLp<'info> {
 }
 
 pub fn handler(ctx: Context<DepositLp>, amount: u64) -> Result<()> {
+    require!(
+        ctx.accounts.protocol_config.status == ProtocolStatus::Active,
+        LaunchVaultError::ProtocolPaused
+    );
     require!(amount > 0, LaunchVaultError::ZeroDepositAmount);
 
     let lp_pool = &ctx.accounts.lp_pool;
@@ -54,7 +64,10 @@ pub fn handler(ctx: Context<DepositLp>, amount: u64) -> Result<()> {
             .ok_or(LaunchVaultError::ArithmeticOverflow)? as u64
     };
 
-    require!(lp_tokens_to_mint > 0, LaunchVaultError::InvalidLpTokenAmount);
+    require!(
+        lp_tokens_to_mint > 0,
+        LaunchVaultError::InvalidLpTokenAmount
+    );
 
     // Transfer SOL from depositor to LP pool
     system_program::transfer(
@@ -90,10 +103,7 @@ pub fn handler(ctx: Context<DepositLp>, amount: u64) -> Result<()> {
     )?;
 
     // Mint LP tokens to depositor (LP mint PDA as authority)
-    let (_, lp_mint_bump) = Pubkey::find_program_address(
-        &[b"lp_mint"],
-        ctx.program_id,
-    );
+    let (_, lp_mint_bump) = Pubkey::find_program_address(&[b"lp_mint"], ctx.program_id);
     let lp_mint_seeds: &[&[u8]] = &[b"lp_mint", &[lp_mint_bump]];
 
     let mint_ix = build_mint_to_instruction(
@@ -133,9 +143,9 @@ pub fn handler(ctx: Context<DepositLp>, amount: u64) -> Result<()> {
     let lp_token_price = if lp_pool.lp_mint_supply > 0 {
         (lp_pool.total_liquidity as u128)
             .checked_mul(1_000_000_000) // 9 decimals precision
-            .unwrap_or(0)
+            .ok_or(LaunchVaultError::ArithmeticOverflow)?
             .checked_div(lp_pool.lp_mint_supply as u128)
-            .unwrap_or(0) as u64
+            .ok_or(LaunchVaultError::ArithmeticOverflow)? as u64
     } else {
         1_000_000_000
     };

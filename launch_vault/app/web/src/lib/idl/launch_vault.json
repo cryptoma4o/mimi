@@ -122,6 +122,90 @@
       "args": []
     },
     {
+      "name": "deposit_insurance_fund",
+      "discriminator": [
+        237,
+        0,
+        91,
+        28,
+        87,
+        48,
+        239,
+        248
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "insurance_fund",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  110,
+                  115,
+                  117,
+                  114,
+                  97,
+                  110,
+                  99,
+                  101,
+                  95,
+                  102,
+                  117,
+                  110,
+                  100
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "protocol_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  116,
+                  111,
+                  99,
+                  111,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "deposit_lp",
       "discriminator": [
         83,
@@ -138,6 +222,33 @@
           "name": "depositor",
           "writable": true,
           "signer": true
+        },
+        {
+          "name": "protocol_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  116,
+                  111,
+                  99,
+                  111,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "lp_pool",
@@ -475,6 +586,63 @@
         {
           "name": "redemption_fee_bps",
           "type": "u16"
+        },
+        {
+          "name": "min_user_contribution",
+          "type": "u64"
+        },
+        {
+          "name": "max_lp_per_position",
+          "type": "u64"
+        },
+        {
+          "name": "min_user_ratio_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "migrate_protocol",
+      "docs": [
+        "One-time migration: realloc ProtocolConfig and remap data layout"
+      ],
+      "discriminator": [
+        182,
+        254,
+        253,
+        220,
+        0,
+        144,
+        234,
+        250
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "protocol_config",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "min_user_contribution",
+          "type": "u64"
+        },
+        {
+          "name": "max_lp_per_position",
+          "type": "u64"
+        },
+        {
+          "name": "min_user_ratio_bps",
+          "type": "u16"
         }
       ]
     },
@@ -507,6 +675,7 @@
         },
         {
           "name": "protocol_config",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -695,6 +864,64 @@
           "type": {
             "vec": "u64"
           }
+        },
+        {
+          "name": "stop_loss_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "pause_protocol",
+      "discriminator": [
+        144,
+        95,
+        0,
+        107,
+        119,
+        39,
+        248,
+        141
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "protocol_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  116,
+                  111,
+                  99,
+                  111,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "reason",
+          "type": "string"
         }
       ]
     },
@@ -924,6 +1151,54 @@
       ]
     },
     {
+      "name": "resume_protocol",
+      "discriminator": [
+        62,
+        91,
+        76,
+        18,
+        174,
+        87,
+        87,
+        208
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "protocol_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  116,
+                  111,
+                  99,
+                  111,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "sell_position",
       "discriminator": [
         11,
@@ -1081,6 +1356,164 @@
       ]
     },
     {
+      "name": "trigger_stop_loss",
+      "discriminator": [
+        17,
+        202,
+        42,
+        253,
+        27,
+        138,
+        151,
+        12
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault.user",
+                "account": "LaunchVaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault.token_mint",
+                "account": "LaunchVaultState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "protocol_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  116,
+                  111,
+                  99,
+                  111,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "lp_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "pump_program"
+        },
+        {
+          "name": "pump_global",
+          "writable": true
+        },
+        {
+          "name": "pump_bonding_curve",
+          "writable": true
+        },
+        {
+          "name": "pump_associated_bonding_curve",
+          "writable": true
+        },
+        {
+          "name": "pump_event_authority"
+        },
+        {
+          "name": "pump_fee_recipient",
+          "writable": true
+        },
+        {
+          "name": "pump_creator_vault",
+          "writable": true
+        },
+        {
+          "name": "pump_fee_config"
+        },
+        {
+          "name": "pump_fee_program"
+        },
+        {
+          "name": "pump_bonding_curve_v2"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "min_sol_output",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "update_protocol_config",
       "discriminator": [
         197,
@@ -1188,14 +1621,116 @@
           }
         },
         {
-          "name": "new_status",
+          "name": "new_cb_position_limit",
           "type": {
-            "option": {
-              "defined": {
-                "name": "ProtocolStatus"
-              }
-            }
+            "option": "u32"
           }
+        },
+        {
+          "name": "new_cb_window_seconds",
+          "type": {
+            "option": "i64"
+          }
+        },
+        {
+          "name": "new_cb_cooldown_seconds",
+          "type": {
+            "option": "i64"
+          }
+        },
+        {
+          "name": "new_min_insurance_fund",
+          "type": {
+            "option": "u64"
+          }
+        }
+      ]
+    },
+    {
+      "name": "withdraw_insurance_fund",
+      "discriminator": [
+        228,
+        196,
+        230,
+        109,
+        1,
+        95,
+        171,
+        196
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "insurance_fund",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  110,
+                  115,
+                  117,
+                  114,
+                  97,
+                  110,
+                  99,
+                  101,
+                  95,
+                  102,
+                  117,
+                  110,
+                  100
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "protocol_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  116,
+                  111,
+                  99,
+                  111,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "destination",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
         }
       ]
     },
@@ -1317,6 +1852,32 @@
   ],
   "events": [
     {
+      "name": "CircuitBreakerTriggeredEvent",
+      "discriminator": [
+        234,
+        166,
+        210,
+        126,
+        160,
+        249,
+        123,
+        142
+      ]
+    },
+    {
+      "name": "InsuranceFundDepositedEvent",
+      "discriminator": [
+        196,
+        168,
+        185,
+        93,
+        67,
+        181,
+        201,
+        129
+      ]
+    },
+    {
       "name": "InsuranceFundUpdatedEvent",
       "discriminator": [
         200,
@@ -1327,6 +1888,19 @@
         104,
         63,
         38
+      ]
+    },
+    {
+      "name": "InsuranceFundWithdrawnEvent",
+      "discriminator": [
+        180,
+        75,
+        105,
+        109,
+        131,
+        33,
+        211,
+        100
       ]
     },
     {
@@ -1431,6 +2005,45 @@
         191,
         125,
         73
+      ]
+    },
+    {
+      "name": "ProtocolPausedEvent",
+      "discriminator": [
+        0,
+        32,
+        186,
+        132,
+        252,
+        198,
+        0,
+        66
+      ]
+    },
+    {
+      "name": "ProtocolResumedEvent",
+      "discriminator": [
+        213,
+        125,
+        245,
+        148,
+        202,
+        50,
+        203,
+        63
+      ]
+    },
+    {
+      "name": "StopLossTriggeredEvent",
+      "discriminator": [
+        70,
+        113,
+        65,
+        104,
+        72,
+        7,
+        217,
+        219
       ]
     },
     {
@@ -1625,9 +2238,119 @@
       "code": 6032,
       "name": "SlippageExceeded",
       "msg": "Minimum SOL output not met"
+    },
+    {
+      "code": 6033,
+      "name": "UserContributionTooLow",
+      "msg": "User contribution below minimum required"
+    },
+    {
+      "code": 6034,
+      "name": "LpAllocationTooHigh",
+      "msg": "LP allocation exceeds maximum allowed"
+    },
+    {
+      "code": 6035,
+      "name": "InsufficientUserRatio",
+      "msg": "User contribution ratio below minimum required"
+    },
+    {
+      "code": 6036,
+      "name": "StopLossNotConfigured",
+      "msg": "Stop-loss not configured for this position"
+    },
+    {
+      "code": 6037,
+      "name": "StopLossAlreadyTriggered",
+      "msg": "Stop-loss already triggered"
+    },
+    {
+      "code": 6038,
+      "name": "StopLossConditionNotMet",
+      "msg": "Stop-loss condition not met (price above threshold)"
+    },
+    {
+      "code": 6039,
+      "name": "CircuitBreakerTriggered",
+      "msg": "Circuit breaker triggered — too many positions or cooldown active"
+    },
+    {
+      "code": 6040,
+      "name": "InsuranceFundBelowMinimum",
+      "msg": "Insurance fund withdrawal would exceed minimum balance"
+    },
+    {
+      "code": 6041,
+      "name": "InvalidInsuranceFundAuthority",
+      "msg": "Invalid insurance fund authority"
+    },
+    {
+      "code": 6042,
+      "name": "ZeroInsuranceFundAmount",
+      "msg": "Insurance fund amount must be greater than zero"
+    },
+    {
+      "code": 6043,
+      "name": "CircuitBreakerInCooldown",
+      "msg": "Cannot resume protocol — circuit breaker still in cooldown"
+    },
+    {
+      "code": 6044,
+      "name": "UnauthorizedPauser",
+      "msg": "Only admin or executor can pause protocol"
+    },
+    {
+      "code": 6045,
+      "name": "InvalidCircuitBreakerParam",
+      "msg": "Invalid circuit breaker parameter"
+    },
+    {
+      "code": 6046,
+      "name": "InvalidStopLossParam",
+      "msg": "Stop-loss basis points must be 0 or less than 10000"
+    },
+    {
+      "code": 6047,
+      "name": "ProtocolNotPaused",
+      "msg": "Protocol is not paused"
+    },
+    {
+      "code": 6048,
+      "name": "InvalidPumpFeeProgram",
+      "msg": "Invalid PumpFun fee program"
+    },
+    {
+      "code": 6049,
+      "name": "InvalidBondingCurveData",
+      "msg": "Invalid bonding curve account data"
+    },
+    {
+      "code": 6050,
+      "name": "InvalidTokenProgram",
+      "msg": "Invalid token program — expected Token2022"
     }
   ],
   "types": [
+    {
+      "name": "CircuitBreakerTriggeredEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "positions_in_window",
+            "type": "u32"
+          },
+          {
+            "name": "window_limit",
+            "type": "u32"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
     {
       "name": "InsuranceFund",
       "type": {
@@ -1655,6 +2378,26 @@
       }
     },
     {
+      "name": "InsuranceFundDepositedEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "new_total",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
       "name": "InsuranceFundUpdatedEvent",
       "type": {
         "kind": "struct",
@@ -1666,6 +2409,30 @@
           {
             "name": "amount_added",
             "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "InsuranceFundWithdrawnEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "new_total",
+            "type": "u64"
+          },
+          {
+            "name": "destination",
+            "type": "pubkey"
           },
           {
             "name": "timestamp",
@@ -1750,6 +2517,34 @@
               "Number of PDA sub-wallets used for buying"
             ],
             "type": "u8"
+          },
+          {
+            "name": "entry_price",
+            "docs": [
+              "Price at which position was opened (lamports per 1M tokens)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "stop_loss_bps",
+            "docs": [
+              "Stop-loss threshold in basis points (0 = disabled)"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "stop_loss_triggered",
+            "docs": [
+              "Whether stop-loss has been triggered"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "stop_loss_timestamp",
+            "docs": [
+              "Timestamp when stop-loss was triggered"
+            ],
+            "type": "i64"
           },
           {
             "name": "bump",
@@ -2083,7 +2878,7 @@
           {
             "name": "close_reward_bps",
             "docs": [
-              "Reward for permissionless closer (basis points of returned LP)"
+              "Reward for permissionless closer (basis points of remaining LP allocation)"
             ],
             "type": "u16"
           },
@@ -2102,12 +2897,82 @@
             "type": "u16"
           },
           {
+            "name": "min_user_contribution",
+            "docs": [
+              "Minimum user contribution per position in lamports"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_lp_per_position",
+            "docs": [
+              "Maximum LP allocation per position in lamports"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_user_ratio_bps",
+            "docs": [
+              "Minimum ratio of user_contribution to lp_allocation in basis points (e.g., 2000 = 20%)"
+            ],
+            "type": "u16"
+          },
+          {
             "name": "status",
             "type": {
               "defined": {
                 "name": "ProtocolStatus"
               }
             }
+          },
+          {
+            "name": "cb_position_limit",
+            "docs": [
+              "Circuit breaker: max positions per window"
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "cb_window_seconds",
+            "docs": [
+              "Circuit breaker: window duration in seconds"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "cb_cooldown_seconds",
+            "docs": [
+              "Circuit breaker: cooldown after trigger in seconds"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "cb_window_start",
+            "docs": [
+              "Circuit breaker: current window start timestamp"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "cb_positions_in_window",
+            "docs": [
+              "Circuit breaker: positions opened in current window"
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "cb_last_trigger",
+            "docs": [
+              "Circuit breaker: last trigger timestamp"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "min_insurance_fund",
+            "docs": [
+              "Minimum insurance fund required (guard for withdrawals)"
+            ],
+            "type": "u64"
           },
           {
             "name": "bump",
@@ -2177,6 +3042,42 @@
       }
     },
     {
+      "name": "ProtocolPausedEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pauser",
+            "type": "pubkey"
+          },
+          {
+            "name": "reason",
+            "type": "string"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProtocolResumedEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "resumer",
+            "type": "pubkey"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
       "name": "ProtocolStatus",
       "type": {
         "kind": "enum",
@@ -2186,6 +3087,42 @@
           },
           {
             "name": "Paused"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StopLossTriggeredEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "token_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "entry_price",
+            "type": "u64"
+          },
+          {
+            "name": "trigger_price",
+            "type": "u64"
+          },
+          {
+            "name": "tokens_sold",
+            "type": "u64"
+          },
+          {
+            "name": "sol_received",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
           }
         ]
       }
