@@ -950,7 +950,8 @@ async function cmdLaunchBundle(flags: Record<string, string | boolean>, keypairP
     .openPosition(
       name, symbol, uri, isMayhem,
       lpLamports, contribLamports,
-      buyAmounts, maxSolCosts
+      buyAmounts, maxSolCosts,
+      0  // stop_loss_bps (0 = disabled)
     )
     .accounts({
       user: walletKeypair.publicKey,
