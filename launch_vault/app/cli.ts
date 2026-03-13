@@ -52,7 +52,15 @@ function deriveProtocolPDAs(programId: PublicKey) {
     [Buffer.from("lp_pool")],
     programId
   );
-  return { protocolConfig, lpPool };
+  const [insuranceFund] = PublicKey.findProgramAddressSync(
+    [Buffer.from("insurance_fund")],
+    programId
+  );
+  const [lpMint] = PublicKey.findProgramAddressSync(
+    [Buffer.from("lp_mint")],
+    programId
+  );
+  return { protocolConfig, lpPool, insuranceFund, lpMint };
 }
 
 function deriveVaultPDA(programId: PublicKey, user: PublicKey, mint: PublicKey) {
@@ -318,7 +326,7 @@ async function cmdInit(flags: Record<string, string | boolean>, keypairPath: str
 async function cmdDepositLp(flags: Record<string, string | boolean>, keypairPath: string, rpc: string | null, cluster: string, priorityFee: number) {
   console.log("=== Launch Vault — Deposit LP ===\n");
   const { walletKeypair, program } = await setupProvider(keypairPath, rpc, cluster);
-  const { lpPool } = deriveProtocolPDAs(program.programId);
+  const { protocolConfig, lpPool, lpMint } = deriveProtocolPDAs(program.programId);
 
   const amountSol = parseFloat((flags.amount as string) || "0");
   if (amountSol <= 0) {
@@ -328,11 +336,6 @@ async function cmdDepositLp(flags: Record<string, string | boolean>, keypairPath
   const amountLamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
   console.log(`Depositing: ${amountSol} SOL (${amountLamports} lamports)\n`);
 
-  // Derive LP mint and depositor's LP ATA
-  const [lpMint] = PublicKey.findProgramAddressSync(
-    [Buffer.from("lp_mint")],
-    program.programId
-  );
   const depositorLpAta = getAssociatedTokenAddressSync(
     lpMint,
     walletKeypair.publicKey,
@@ -345,6 +348,7 @@ async function cmdDepositLp(flags: Record<string, string | boolean>, keypairPath
       .depositLp(new anchor.BN(amountLamports))
       .accounts({
         depositor: walletKeypair.publicKey,
+        protocolConfig,
         lpPool,
         lpMint,
         depositorLpAta,
@@ -1053,7 +1057,7 @@ async function cmdLaunchBundle(flags: Record<string, string | boolean>, keypairP
 async function cmdStatus(flags: Record<string, string | boolean>, keypairPath: string, rpc: string | null, cluster: string) {
   console.log("=== Launch Vault — Protocol Status ===\n");
   const { program, connection } = await setupProvider(keypairPath, rpc, cluster);
-  const { protocolConfig, lpPool } = deriveProtocolPDAs(program.programId);
+  const { protocolConfig, lpPool, insuranceFund } = deriveProtocolPDAs(program.programId);
 
   const configInfo = await connection.getAccountInfo(protocolConfig);
   if (!configInfo) {
@@ -1066,26 +1070,205 @@ async function cmdStatus(flags: Record<string, string | boolean>, keypairPath: s
     const config = await (program.account as any).protocolConfig.fetch(protocolConfig);
     const pool = await (program.account as any).lpPool.fetch(lpPool);
 
+    // Determine status string
+    const statusStr = (config as any).status.active ? "Active" : "Paused";
+
     console.log("--- Protocol Config ---");
-    console.log(`  Address:           ${protocolConfig.toBase58()}`);
-    console.log(`  Admin:             ${(config as any).admin.toBase58()}`);
-    console.log(`  Executor:          ${(config as any).executor.toBase58()}`);
-    console.log(`  Treasury:          ${(config as any).treasury.toBase58()}`);
-    console.log(`  Rental period:     ${(config as any).rentalPeriod.toString()}s`);
-    console.log(`  Rental fee rate:   ${(config as any).rentalFeeRate.toString()} lamports`);
-    console.log(`  Infrastructure fee: ${(config as any).infrastructureFee.toString()} lamports`);
-    console.log(`  Redemption fee:    ${(config as any).redemptionFeeBps} bps`);
-    console.log(`  Grace period:      ${(config as any).gracePeriod.toString()}s`);
-    console.log(`  Status:            ${JSON.stringify((config as any).status)}`);
+    console.log(`  Address:              ${protocolConfig.toBase58()}`);
+    console.log(`  Admin:                ${(config as any).admin.toBase58()}`);
+    console.log(`  Executor:             ${(config as any).executor.toBase58()}`);
+    console.log(`  Treasury:             ${(config as any).treasury.toBase58()}`);
+    console.log(`  Status:               ${statusStr}`);
+    console.log();
+    console.log("  --- Fees ---");
+    console.log(`  Fixed fee:            ${(config as any).fixedFee.toString()} lamports (${((config as any).fixedFee.toNumber() / LAMPORTS_PER_SOL).toFixed(4)} SOL)`);
+    console.log(`  Fee BPS:              ${(config as any).feeBps} bps`);
+    console.log(`  Insurance split:      ${(config as any).insuranceSplitBps} bps`);
+    console.log(`  Redemption fee:       ${(config as any).redemptionFeeBps} bps`);
+    console.log();
+    console.log("  --- Position Limits ---");
+    console.log(`  Position timeout:     ${(config as any).positionTimeout.toString()}s`);
+    console.log(`  Max utilization:      ${(config as any).maxUtilizationBps} bps`);
+    console.log(`  Close reward:         ${(config as any).closeRewardBps} bps`);
+    console.log(`  Min user contribution: ${(config as any).minUserContribution.toString()} lamports (${((config as any).minUserContribution.toNumber() / LAMPORTS_PER_SOL).toFixed(4)} SOL)`);
+    console.log(`  Max LP per position:  ${(config as any).maxLpPerPosition.toString()} lamports (${((config as any).maxLpPerPosition.toNumber() / LAMPORTS_PER_SOL).toFixed(4)} SOL)`);
+    console.log(`  Min user ratio:       ${(config as any).minUserRatioBps} bps`);
+    console.log();
+    console.log("  --- Circuit Breaker ---");
+    console.log(`  Position limit:       ${(config as any).cbPositionLimit}`);
+    console.log(`  Window:               ${(config as any).cbWindowSeconds.toString()}s`);
+    console.log(`  Cooldown:             ${(config as any).cbCooldownSeconds.toString()}s`);
+    console.log(`  Positions in window:  ${(config as any).cbPositionsInWindow}`);
+    console.log(`  Last trigger:         ${(config as any).cbLastTrigger.toString()}`);
     console.log();
     console.log("--- LP Pool ---");
-    console.log(`  Address:           ${lpPool.toBase58()}`);
-    console.log(`  Authority:         ${(pool as any).authority.toBase58()}`);
-    console.log(`  Total liquidity:   ${((pool as any).totalLiquidity.toNumber() / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
-    console.log(`  Reserved:          ${((pool as any).reservedLiquidity.toNumber() / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
-    console.log(`  Available:         ${((pool as any).availableLiquidity.toNumber() / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+    console.log(`  Address:              ${lpPool.toBase58()}`);
+    console.log(`  Authority:            ${(pool as any).authority.toBase58()}`);
+    console.log(`  Total liquidity:      ${((pool as any).totalLiquidity.toNumber() / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+    console.log(`  Reserved:             ${((pool as any).reservedLiquidity.toNumber() / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+    console.log(`  Available:            ${((pool as any).availableLiquidity.toNumber() / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+    console.log(`  LP mint supply:       ${(pool as any).lpMintSupply.toString()}`);
+    console.log(`  Total defaults:       ${(pool as any).totalDefaults}`);
+    console.log(`  Positions closed:     ${(pool as any).totalPositionsClosed}`);
+
+    // Insurance fund
+    console.log();
+    console.log("--- Insurance Fund ---");
+    console.log(`  Address:              ${insuranceFund.toBase58()}`);
+    try {
+      const fund = await (program.account as any).insuranceFund.fetch(insuranceFund);
+      console.log(`  Total SOL:            ${((fund as any).totalSol.toNumber() / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+      console.log(`  Authority:            ${(fund as any).authority.toBase58()}`);
+      const fundBalance = await connection.getBalance(insuranceFund);
+      console.log(`  PDA balance:          ${(fundBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+    } catch {
+      console.log(`  (not initialized or not readable)`);
+    }
   } catch (err: any) {
     console.error("Failed to read state:", err.message || err);
+    process.exit(1);
+  }
+}
+
+// ── cmdPauseProtocol ─────────────────────────────────────────────────────────
+
+async function cmdPauseProtocol(flags: Record<string, string | boolean>, keypairPath: string, rpc: string | null, cluster: string, priorityFee: number) {
+  console.log("=== Launch Vault — Pause Protocol ===\n");
+  const { walletKeypair, program } = await setupProvider(keypairPath, rpc, cluster);
+  const { protocolConfig } = deriveProtocolPDAs(program.programId);
+
+  const reason = (flags.reason as string) || "manual pause";
+
+  console.log(`Reason: ${reason}\n`);
+
+  try {
+    const tx = await program.methods
+      .pauseProtocol(reason)
+      .accounts({
+        signer: walletKeypair.publicKey,
+        protocolConfig,
+      })
+      .preInstructions(preInstructions(priorityFee))
+      .rpc({ commitment: "confirmed" });
+
+    console.log("=== Protocol Paused ===\n");
+    console.log(`TX:       ${tx}`);
+    console.log(`Explorer: ${explorerUrl(tx, cluster)}`);
+  } catch (err: any) {
+    console.error("Transaction failed:");
+    if (err.logs) err.logs.forEach((l: string) => console.error(`  ${l}`));
+    console.error(err.message || err);
+    process.exit(1);
+  }
+}
+
+// ── cmdResumeProtocol ────────────────────────────────────────────────────────
+
+async function cmdResumeProtocol(flags: Record<string, string | boolean>, keypairPath: string, rpc: string | null, cluster: string, priorityFee: number) {
+  console.log("=== Launch Vault — Resume Protocol ===\n");
+  const { walletKeypair, program } = await setupProvider(keypairPath, rpc, cluster);
+  const { protocolConfig } = deriveProtocolPDAs(program.programId);
+
+  try {
+    const tx = await program.methods
+      .resumeProtocol()
+      .accounts({
+        admin: walletKeypair.publicKey,
+        protocolConfig,
+      })
+      .preInstructions(preInstructions(priorityFee))
+      .rpc({ commitment: "confirmed" });
+
+    console.log("=== Protocol Resumed ===\n");
+    console.log(`TX:       ${tx}`);
+    console.log(`Explorer: ${explorerUrl(tx, cluster)}`);
+  } catch (err: any) {
+    console.error("Transaction failed:");
+    if (err.logs) err.logs.forEach((l: string) => console.error(`  ${l}`));
+    console.error(err.message || err);
+    process.exit(1);
+  }
+}
+
+// ── cmdDepositInsuranceFund ──────────────────────────────────────────────────
+
+async function cmdDepositInsuranceFund(flags: Record<string, string | boolean>, keypairPath: string, rpc: string | null, cluster: string, priorityFee: number) {
+  console.log("=== Launch Vault — Deposit Insurance Fund ===\n");
+  const { walletKeypair, program } = await setupProvider(keypairPath, rpc, cluster);
+  const { protocolConfig, insuranceFund } = deriveProtocolPDAs(program.programId);
+
+  const amountSol = parseFloat((flags.amount as string) || "0");
+  if (amountSol <= 0) {
+    console.error("Usage: yarn cli deposit-insurance-fund --amount <SOL>");
+    process.exit(1);
+  }
+  const amountLamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
+  console.log(`Depositing: ${amountSol} SOL (${amountLamports} lamports)\n`);
+
+  try {
+    const tx = await program.methods
+      .depositInsuranceFund(new anchor.BN(amountLamports))
+      .accounts({
+        payer: walletKeypair.publicKey,
+        insuranceFund,
+        protocolConfig,
+        systemProgram: SystemProgram.programId,
+      })
+      .preInstructions(preInstructions(priorityFee))
+      .rpc({ commitment: "confirmed" });
+
+    console.log("=== Insurance Fund Deposited ===\n");
+    console.log(`TX:       ${tx}`);
+    console.log(`Explorer: ${explorerUrl(tx, cluster)}`);
+  } catch (err: any) {
+    console.error("Transaction failed:");
+    if (err.logs) err.logs.forEach((l: string) => console.error(`  ${l}`));
+    console.error(err.message || err);
+    process.exit(1);
+  }
+}
+
+// ── cmdWithdrawInsuranceFund ─────────────────────────────────────────────────
+
+async function cmdWithdrawInsuranceFund(flags: Record<string, string | boolean>, keypairPath: string, rpc: string | null, cluster: string, priorityFee: number) {
+  console.log("=== Launch Vault — Withdraw Insurance Fund ===\n");
+  const { walletKeypair, program } = await setupProvider(keypairPath, rpc, cluster);
+  const { protocolConfig, insuranceFund } = deriveProtocolPDAs(program.programId);
+
+  const amountSol = parseFloat((flags.amount as string) || "0");
+  if (amountSol <= 0) {
+    console.error("Usage: yarn cli withdraw-insurance-fund --amount <SOL> [--destination <PUBKEY>]");
+    process.exit(1);
+  }
+  const amountLamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
+
+  const destination = (flags.destination as string)
+    ? new PublicKey(flags.destination as string)
+    : walletKeypair.publicKey;
+
+  console.log(`Withdrawing: ${amountSol} SOL (${amountLamports} lamports)`);
+  console.log(`Destination: ${destination.toBase58()}\n`);
+
+  try {
+    const tx = await program.methods
+      .withdrawInsuranceFund(new anchor.BN(amountLamports))
+      .accounts({
+        admin: walletKeypair.publicKey,
+        insuranceFund,
+        protocolConfig,
+        destination,
+        systemProgram: SystemProgram.programId,
+      })
+      .preInstructions(preInstructions(priorityFee))
+      .rpc({ commitment: "confirmed" });
+
+    console.log("=== Insurance Fund Withdrawn ===\n");
+    console.log(`TX:       ${tx}`);
+    console.log(`Explorer: ${explorerUrl(tx, cluster)}`);
+  } catch (err: any) {
+    console.error("Transaction failed:");
+    if (err.logs) err.logs.forEach((l: string) => console.error(`  ${l}`));
+    console.error(err.message || err);
     process.exit(1);
   }
 }
@@ -1190,17 +1373,21 @@ async function main() {
 Usage: yarn cli <command> [options]
 
 Commands:
-  init              Initialize protocol (ProtocolConfig + LpPool)
-  deposit-lp        Deposit SOL to LP pool
-  withdraw-lp       Withdraw SOL from LP pool
-  create-token      Create token via PumpFun v2 CPI
-  create-vault      Create vault for a token
-  proxy-buy         Execute token buy via PumpFun v2 (vault → Active)
-  launch-bundle     Atomic: create token + vault + buy tokens in one TX
-  sell-position     Sell tokens via PumpFun v2 CPI
-  upload-metadata   Generate and upload token metadata JSON to IPFS
-  status            Show protocol status
-  help              Show this help
+  init                    Initialize protocol (ProtocolConfig + LpPool)
+  deposit-lp              Deposit SOL to LP pool
+  withdraw-lp             Withdraw SOL from LP pool
+  create-token            Create token via PumpFun v2 CPI
+  create-vault            Create vault for a token
+  proxy-buy               Execute token buy via PumpFun v2 (vault → Active)
+  launch-bundle           Atomic: create token + vault + buy tokens in one TX
+  sell-position           Sell tokens via PumpFun v2 CPI
+  upload-metadata         Generate and upload token metadata JSON to IPFS
+  pause-protocol          Pause protocol (admin/executor)
+  resume-protocol         Resume protocol (admin only)
+  deposit-insurance-fund  Deposit SOL to insurance fund
+  withdraw-insurance-fund Withdraw SOL from insurance fund (admin)
+  status                  Show protocol status
+  help                    Show this help
 
 Global options:
   --keypair <PATH>        Wallet keypair (default: ~/solana-wallet.json)
@@ -1210,11 +1397,12 @@ Global options:
 
 Command-specific options:
   init:
-    --rental-period <SEC>   Rental period in seconds (default: 86400)
-    --rental-fee <LAMP>     Rental fee in lamports (default: 100000)
-    --infra-fee <LAMP>      Infrastructure fee in lamports (default: 50000)
+    --fixed-fee <LAMP>      Fixed fee in lamports (default: 10000000)
+    --fee-bps <BPS>         Fee BPS on LP capital (default: 200)
+    --max-util-bps <BPS>    Max utilization bps (default: 8500)
+    --position-timeout <SEC>  Position timeout in seconds (default: 3600)
+    --insurance-split-bps <BPS>  Insurance split bps (default: 2000)
     --redeem-bps <BPS>      Redemption fee in bps (default: 250)
-    --grace-period <SEC>    Grace period in seconds (default: 3600)
 
   deposit-lp / withdraw-lp:
     --amount <SOL>          Amount in SOL
@@ -1259,6 +1447,16 @@ Command-specific options:
     --twitter <URL>         Twitter link (optional)
     --telegram <URL>        Telegram link (optional)
     --website <URL>         Website link (optional)
+
+  pause-protocol:
+    --reason <TEXT>          Pause reason (default: "manual pause")
+
+  deposit-insurance-fund:
+    --amount <SOL>          Amount in SOL
+
+  withdraw-insurance-fund:
+    --amount <SOL>          Amount in SOL
+    --destination <PUBKEY>  Destination wallet (default: signer wallet)
 `);
     return;
   }
@@ -1290,6 +1488,18 @@ Command-specific options:
       break;
     case "upload-metadata":
       await cmdUploadMetadata(flags);
+      break;
+    case "pause-protocol":
+      await cmdPauseProtocol(flags, keypairPath, rpc, cluster, priorityFee);
+      break;
+    case "resume-protocol":
+      await cmdResumeProtocol(flags, keypairPath, rpc, cluster, priorityFee);
+      break;
+    case "deposit-insurance-fund":
+      await cmdDepositInsuranceFund(flags, keypairPath, rpc, cluster, priorityFee);
+      break;
+    case "withdraw-insurance-fund":
+      await cmdWithdrawInsuranceFund(flags, keypairPath, rpc, cluster, priorityFee);
       break;
     case "status":
       await cmdStatus(flags, keypairPath, rpc, cluster);
